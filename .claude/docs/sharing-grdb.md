@@ -1,8 +1,8 @@
-# SharingGRDB Guide
+# SQLiteData Guide
 
 ## Introduction
 
-SharingGRDB is a fast, lightweight replacement for SwiftData that deploys back to iOS 13. It combines the power of SQLite with type-safe query building and automatic SwiftUI observation.
+SQLiteData is a fast, lightweight replacement for SwiftData that deploys back to iOS 13. It combines the power of SQLite with type-safe query building and automatic SwiftUI observation.
 
 ```swift
 // SwiftData
