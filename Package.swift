@@ -23,6 +23,6 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/sqlite-data", from: "1.3.0"),
     .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.17.0"),
     .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.3.9"),
-    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.3.0"),
+    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.3.0")
   ]
 )
