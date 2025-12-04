@@ -2,7 +2,7 @@ import ProjectDescription
 import ProjectDescriptionHelpers
 
 let project = Project.framework(
-  name: "Indigo",
+  name: "IndigoFoundation",
   dependencies: [
     .external(name: "Algorithms"),
     .external(name: "ComposableArchitecture"),
@@ -12,6 +12,6 @@ let project = Project.framework(
     .external(name: "GRDB"),
     .external(name: "IssueReporting"),
     .external(name: "JWTAuth"),
-    .external(name: "LoggingClient"),
+    .external(name: "LoggingClient")
   ]
 )

@@ -14,6 +14,8 @@ extension Project {
           "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
           "ENABLE_MODULE_VERIFIER": "YES",
           "MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS": "gnu11 gnu++14",
+          "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
+          "REGISTER_APP_GROUPS": "YES"
         ]
       ),
       targets: [
@@ -25,8 +27,14 @@ extension Project {
           deploymentTargets: .platforms,
           sources: ["Sources/**"],
           dependencies: (tca
-            ? [.project(target: "Indigo", path: .relativeToRoot("Indigo"))] : [])
-            + dependencies
+            ? [.project(target: "IndigoFoundation", path: .relativeToRoot("IndigoFoundation"))]
+            : [])
+            + dependencies,
+          settings: .settings(
+            base: [
+              "DEFINES_MODULE": "NO"
+            ]
+          )
         ),
         .target(
           name: "\(name)Tests",
@@ -37,7 +45,7 @@ extension Project {
           dependencies: [
             .target(name: name)
           ]
-        ),
+        )
       ]
     )
   }
@@ -46,8 +54,8 @@ extension Project {
 extension ProjectDescription.DeploymentTargets {
   public static var platforms: DeploymentTargets {
     .multiplatform(
-      iOS: "18.0",
-      macOS: "15.0",
+      iOS: "26.0",
+      macOS: "26.0",
       watchOS: nil,
       tvOS: nil,
       visionOS: nil

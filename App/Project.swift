@@ -6,25 +6,25 @@ let project = Project(
   settings: .settings(
     base: [
       "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
-      "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES",
+      "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES"
     ],
     configurations: [
       .debug(name: "Debug", xcconfig: .relativeToRoot("Configs/Debug.xcconfig")),
-      .release(name: "Release", xcconfig: .relativeToRoot("Configs/Release.xcconfig")),
+      .release(name: "Release", xcconfig: .relativeToRoot("Configs/Release.xcconfig"))
     ]
   ),
   targets: [
     .target(
-      name: appName.targetName,
+      name: appTarget.targetName,
       destinations: .destinations,
       product: .app,
-      bundleId: "\(teamReverseDomain).\(appName.targetName)",
+      bundleId: "\(teamReverseDomain).\(appTarget.targetName)",
       deploymentTargets: .platforms,
       infoPlist: .extendingDefault(
         with: [
           "UILaunchScreen": [
             "UIColorName": "",
-            "UIImageName": "",
+            "UIImageName": ""
           ]
         ]
       ),
@@ -34,7 +34,7 @@ let project = Project(
         .project(target: "Core", path: .relativeToRoot("Core")),
         .project(target: "Components", path: .relativeToRoot("Components")),
         .project(target: "FeatureA", path: .relativeToRoot("FeatureA")),
-        .project(target: "FeatureB", path: .relativeToRoot("FeatureB")),
+        .project(target: "FeatureB", path: .relativeToRoot("FeatureB"))
       ],
       settings: .settings(
         base: [
@@ -42,52 +42,52 @@ let project = Project(
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": .string("mac.entitlements"),
           "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": .string("ios.entitlements"),
           "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": .string("ios.entitlements"),
-          "INFOPLIST_KEY_CFBundleDisplayName": "$(DISPLAY_NAME)",
+          "INFOPLIST_KEY_CFBundleDisplayName": "$(DISPLAY_NAME)"
         ]
       )
     ),
     .target(
-      name: "\(appName.targetName)Tests",
+      name: "\(appTarget.targetName)Tests",
       destinations: .destinations,
       product: .unitTests,
-      bundleId: "\(teamReverseDomain).\(appName.targetName)Tests",
+      bundleId: "\(teamReverseDomain).\(appTarget.targetName)Tests",
       sources: ["Tests/**"],
       dependencies: [
-        .target(name: appName.targetName)
+        .target(name: appTarget.targetName)
       ]
-    ),
+    )
   ],
   schemes: [
     .scheme(
-      name: "\(appName.targetName)",
+      name: appTarget.targetName,
       shared: true,
-      buildAction: .buildAction(targets: [appName]),
+      buildAction: .buildAction(targets: [appTarget]),
       testAction: .testPlans([.relativeToManifest("All.xctestplan")]),
       runAction: .runAction(
         configuration: "Debug",
-        executable: appName
+        executable: appTarget
       ),
       archiveAction: .archiveAction(configuration: "Debug"),
       profileAction: .profileAction(
         configuration: "Debug",
-        executable: appName
+        executable: appTarget
       ),
       analyzeAction: .analyzeAction(configuration: "Debug")
     ),
     .scheme(
-      name: "\(appName.targetName) Release",
+      name: "\(appTarget.targetName) Release",
       shared: true,
-      buildAction: .buildAction(targets: [appName]),
+      buildAction: .buildAction(targets: [appTarget]),
       runAction: .runAction(
         configuration: "Release",
-        executable: appName
+        executable: appTarget
       ),
       archiveAction: .archiveAction(configuration: "Release"),
       profileAction: .profileAction(
         configuration: "Release",
-        executable: appName
+        executable: appTarget
       ),
       analyzeAction: .analyzeAction(configuration: "Release")
-    ),
+    )
   ]
 )
