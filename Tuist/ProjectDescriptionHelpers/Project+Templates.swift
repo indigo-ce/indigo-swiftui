@@ -11,11 +11,9 @@ extension Project {
       name: name,
       settings: .settings(
         base: [
-          "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
           "ENABLE_MODULE_VERIFIER": "YES",
           "MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS": "gnu11 gnu++14",
-          "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
-          "REGISTER_APP_GROUPS": "YES"
+          "STRING_CATALOG_GENERATE_SYMBOLS": "YES"
         ]
       ),
       targets: [

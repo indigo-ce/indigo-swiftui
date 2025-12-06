@@ -4,10 +4,6 @@ import ProjectDescriptionHelpers
 let project = Project(
   name: "App",
   settings: .settings(
-    base: [
-      "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
-      "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES"
-    ],
     configurations: [
       .debug(name: "Debug", xcconfig: .relativeToRoot("Configs/Debug.xcconfig")),
       .release(name: "Release", xcconfig: .relativeToRoot("Configs/Release.xcconfig"))
@@ -38,11 +34,9 @@ let project = Project(
       ],
       settings: .settings(
         base: [
-          "OTHER_LDFLAGS": ["$(inherited)", "-ObjC"],
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": .string("mac.entitlements"),
           "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": .string("ios.entitlements"),
-          "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": .string("ios.entitlements"),
-          "INFOPLIST_KEY_CFBundleDisplayName": "$(DISPLAY_NAME)"
+          "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": .string("ios.entitlements")
         ]
       )
     ),
