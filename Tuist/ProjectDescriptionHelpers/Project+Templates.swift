@@ -24,6 +24,7 @@ extension Project {
           bundleId: "\(reverseDomain).\(name)",
           deploymentTargets: .platforms,
           sources: ["Sources/**"],
+          resources: ["Resources/**"],
           dependencies: (tca
             ? [.project(target: "IndigoFoundation", path: .relativeToRoot("IndigoFoundation"))]
             : [])
@@ -40,6 +41,7 @@ extension Project {
           product: .unitTests,
           bundleId: "\(reverseDomain).\(name)Tests",
           sources: ["Tests/**"],
+          Resources: ["Tests/Resources/**"],
           dependencies: [
             .target(name: name)
           ]
