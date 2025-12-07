@@ -41,7 +41,7 @@ extension Project {
           product: .unitTests,
           bundleId: "\(reverseDomain).\(name)Tests",
           sources: ["Tests/**"],
-          Resources: ["Tests/Resources/**"],
+          resources: ["Tests/Resources/**"],
           dependencies: [
             .target(name: name)
           ]
