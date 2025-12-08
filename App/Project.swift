@@ -55,7 +55,10 @@ let project = Project(
     .scheme(
       name: appTarget.targetName,
       shared: true,
-      buildAction: .buildAction(targets: [appTarget]),
+      buildAction: .buildAction(
+        targets: [appTarget],
+        findImplicitDependencies: false
+      ),
       testAction: .testPlans([.relativeToManifest("All.xctestplan")]),
       runAction: .runAction(
         configuration: "Debug",
@@ -71,7 +74,10 @@ let project = Project(
     .scheme(
       name: "\(appTarget.targetName) Release",
       shared: true,
-      buildAction: .buildAction(targets: [appTarget]),
+      buildAction: .buildAction(
+        targets: [appTarget],
+        findImplicitDependencies: false
+      ),
       runAction: .runAction(
         configuration: "Release",
         executable: appTarget
