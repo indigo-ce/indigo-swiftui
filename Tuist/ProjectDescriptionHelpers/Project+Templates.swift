@@ -26,14 +26,12 @@ extension Project {
           sources: ["Sources/**"],
           resources: ["Resources/**"],
           dependencies: (tca
-            ? [.project(target: "IndigoFoundation", path: .relativeToRoot("IndigoFoundation"))]
-            : [])
-            + dependencies,
-          settings: .settings(
-            base: [
-              "DEFINES_MODULE": "NO"
+            ? [
+              .project(target: "IndigoFoundation", path: .relativeToRoot("IndigoFoundation")),
+              .external(name: "ComposableArchitecture")
             ]
-          )
+            : [])
+            + dependencies
         ),
         .target(
           name: "\(name)Tests",
@@ -44,7 +42,7 @@ extension Project {
           resources: ["Tests/Resources/**"],
           dependencies: [
             .target(name: name)
-          ]
+          ] + (tca ? [.external(name: "ComposableArchitecture")] : [])
         )
       ]
     )
