@@ -4,8 +4,8 @@ extension Project {
   public static func framework(
     name: String,
     reverseDomain: String = teamReverseDomain,
-    tca: Bool = false,
-    dependencies: [TargetDependency] = []
+    dependencies: [TargetDependency] = [],
+    testDependencies: [TargetDependency] = []
   ) -> Project {
     .init(
       name: name,
@@ -25,13 +25,7 @@ extension Project {
           deploymentTargets: .platforms,
           sources: ["Sources/**"],
           resources: ["Resources/**"],
-          dependencies: (tca
-            ? [
-              .project(target: "IndigoFoundation", path: .relativeToRoot("IndigoFoundation")),
-              .external(name: "ComposableArchitecture")
-            ]
-            : [])
-            + dependencies
+          dependencies: dependencies
         ),
         .target(
           name: "\(name)Tests",
@@ -40,9 +34,7 @@ extension Project {
           bundleId: "\(reverseDomain).\(name)Tests",
           sources: ["Tests/**"],
           resources: ["Tests/Resources/**"],
-          dependencies: [
-            .target(name: name)
-          ] + (tca ? [.external(name: "ComposableArchitecture")] : [])
+          dependencies: [.target(name: name)] + testDependencies,
         )
       ]
     )

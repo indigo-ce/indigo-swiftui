@@ -3,5 +3,10 @@ import ProjectDescriptionHelpers
 
 let project = Project.framework(
   name: "Components",
-  tca: true
+  dependencies: [
+    .project(
+      target: "IndigoFoundation",
+      path: .relativeToRoot("IndigoFoundation")
+    )
+  ]
 )
