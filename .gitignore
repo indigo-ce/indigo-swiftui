@@ -65,6 +65,7 @@ DerivedData/
 ### Tuist derived files ###
 graph.dot
 Derived/
+graph.png
 
 ### SPM ###
 .build/

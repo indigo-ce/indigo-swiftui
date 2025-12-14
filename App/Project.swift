@@ -31,7 +31,7 @@ let project = Project(
         .project(target: "Components", path: .relativeToRoot("Components")),
         .project(target: "FeatureA", path: .relativeToRoot("FeatureA")),
         .project(target: "FeatureB", path: .relativeToRoot("FeatureB"))
-      ],
+      ] + .indigoFoundation,
       settings: .settings(
         base: [
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": .string("mac.entitlements"),
@@ -55,10 +55,7 @@ let project = Project(
     .scheme(
       name: appTarget.targetName,
       shared: true,
-      buildAction: .buildAction(
-        targets: [appTarget],
-        findImplicitDependencies: false
-      ),
+      buildAction: .buildAction(targets: [appTarget]),
       testAction: .testPlans([.relativeToManifest("All.xctestplan")]),
       runAction: .runAction(
         configuration: "Debug",
@@ -74,10 +71,7 @@ let project = Project(
     .scheme(
       name: "\(appTarget.targetName) Release",
       shared: true,
-      buildAction: .buildAction(
-        targets: [appTarget],
-        findImplicitDependencies: false
-      ),
+      buildAction: .buildAction(targets: [appTarget]),
       runAction: .runAction(
         configuration: "Release",
         executable: appTarget

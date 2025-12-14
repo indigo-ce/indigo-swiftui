@@ -7,7 +7,6 @@ let workspace = Workspace(
     "App",
     "Core",
     "Components",
-    "IndigoFoundation",
     "FeatureA",
     "FeatureB"
   ],

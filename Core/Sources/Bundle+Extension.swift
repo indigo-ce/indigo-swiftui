@@ -20,3 +20,11 @@ extension Bundle {
     return "\(releaseVersionNumber) (\(buildVersionNumber))"
   }
 }
+
+extension Bundle {
+  public static var core: Bundle {
+    Bundle(for: BundleToken.self)
+  }
+}
+
+private final class BundleToken {}

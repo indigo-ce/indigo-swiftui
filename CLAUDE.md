@@ -33,7 +33,6 @@ The project requires Tuist 4.54.3+ and targets iOS 18.0+/macOS 15.0+.
 - **App/** - Main application with SwiftUI views and app entry point
 - **Core/** - Business logic, data models, and shared utilities
 - **Components/** - Reusable SwiftUI components with no external dependencies
-- **IndigoFoundation/** - Core TCA infrastructure and shared utilities
 - **FeatureA/** and **FeatureB/** - Example TCA-based feature modules
 
 ### Dependency Graph
@@ -42,10 +41,13 @@ The project requires Tuist 4.54.3+ and targets iOS 18.0+/macOS 15.0+.
 App
 ├── Core (business logic)
 ├── Components (reusable UI components, no dependencies)
-├── FeatureA (TCA-based feature → IndigoFoundation)
-└── FeatureB (TCA-based feature → IndigoFoundation)
+├── FeatureA (TCA-based feature)
+├── FeatureB (TCA-based feature)
+└── External packages (via .indigoFoundation helper)
 
-IndigoFoundation (TCA shared utilities + external dependencies)
+Core → External packages (via .indigoFoundation helper)
+FeatureA/FeatureB → External packages (via .indigoFoundation helper)
+Components → (no dependencies)
 ```
 
 ### Key Architectural Patterns
@@ -57,11 +59,13 @@ IndigoFoundation (TCA shared utilities + external dependencies)
 ### Key Dependencies
 
 - **ComposableArchitecture** - State management and dependency injection
-- **GRDB** - SQLite database layer (available via IndigoFoundation)
+- **GRDB** - SQLite database layer
 - **JWTAuth** - Authentication with automatic token refresh
 - **LoggingClient** - Structured logging
 - **ComposableToasts** - Toast notification system
 - **Algorithms** - Swift standard library algorithms
+- **Pulse/PulseUI** - Network debugging and logging
+- **NetworkImage** - Async image loading
 
 ## Code Organization
 
@@ -69,13 +73,14 @@ IndigoFoundation (TCA shared utilities + external dependencies)
 
 - Feature-specific reducers handle individual screens
 - Dependencies injected via TCA's dependency system
-- IndigoFoundation provides shared TCA infrastructure
+- External dependencies accessed via `.indigoFoundation` helper
 
 ### Module Philosophy
 
 - **Components**: Intentionally kept dependency-free for maximum reusability across projects
-- **IndigoFoundation**: Consolidates all external dependencies and TCA infrastructure
-- **Feature Modules**: Depend only on IndigoFoundation, follow consistent naming patterns
+- **Core**: Contains all business logic, models, and utilities
+- **Feature Modules**: Follow consistent naming patterns (XFeature for reducers, XView for SwiftUI views)
+- **Dependency Management**: External packages (TCA, GRDB, etc.) are managed via the `.indigoFoundation` helper in Project+Templates.swift
 
 ### Project Settings
 
@@ -115,3 +120,18 @@ tuist generate
 ## Multi-Platform Support
 
 The app targets iOS and macOS with shared codebase and platform-specific optimizations. Separate entitlements are configured for each platform.
+
+## Dependency Management
+
+### External Dependencies
+
+- External dependencies (TCA, GRDB, Pulse, etc.) are declared using the `.indigoFoundation` helper array in `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`
+- To prevent double-linking issues, ensure all external packages used by multiple targets are marked as `.framework` in `Package.swift`
+- Run the following commands after making dependency changes:
+
+  ```bash
+  tuist install
+  tuist generate
+  tuist inspect implicit-imports
+  tuist inspect redundant-imports
+  ```

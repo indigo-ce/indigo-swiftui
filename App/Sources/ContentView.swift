@@ -1,15 +1,15 @@
-import SwiftUI
 import Core
+import SwiftUI
 
 public struct ContentView: View {
   public init() {}
 
   public var body: some View {
     VStack {
-      Text(Core().hello())
+      Text("Hello World!")
         .padding()
 
-      Text("\(Core().random())")
+      Text(verbatim: Bundle.main.fullVersionString ?? "")
         .padding()
     }
   }

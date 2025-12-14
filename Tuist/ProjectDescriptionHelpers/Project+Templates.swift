@@ -1,5 +1,22 @@
 import ProjectDescription
 
+extension Array where Element == TargetDependency {
+  public static var indigoFoundation: [TargetDependency] {
+    [
+      .external(name: "Algorithms"),
+      .external(name: "ComposableArchitecture"),
+      .external(name: "ComposableToasts"),
+      .external(name: "Dependencies"),
+      .external(name: "DependenciesMacros"),
+      .external(name: "GRDB"),
+      .external(name: "NetworkImage"),
+      .external(name: "Pulse"),
+      .external(name: "PulseUI"),
+      .external(name: "SwiftNavigation")
+    ]
+  }
+}
+
 extension Project {
   public static func framework(
     name: String,

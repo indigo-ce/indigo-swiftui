@@ -1,170 +1,125 @@
 # 🪻 Indigo Stack CE — Apple Platforms
 
-## Getting Started
+A modular SwiftUI template using [Tuist](https://tuist.dev/) and [The Composable Architecture](https://github.com/pointfreeco/swift-composable-architecture) for building iOS and macOS applications.
 
-The Indigo stack uses [Tuist](https://tuist.dev/) for organizing and managing
-the project structure, dependencies, and build settings for Apple platform applications.
+## Getting Started
 
 ### Setup
 
-1- **Configure project settings**: Update the values in `Tuist/ProjectDescriptionHelpers/Config.swift` to match your project:
+1. **Configure project settings** in `Tuist/ProjectDescriptionHelpers/Config.swift`:
 
-```swift
-public let teamReverseDomain = "com.yourcompany"  // Replace with your domain
-public let appName: TargetReference = "YourApp"   // Replace with your app name
-```
+   ```swift
+   public let teamReverseDomain = "com.yourcompany"
+   public let appName: TargetReference = "YourApp"
+   ```
 
-2- Install Tuist by running:
+2. **Install Tuist**:
 
-```sh
-curl https://mise.jdx.dev/install.sh | sh
-mise install
-```
+   ```sh
+   curl https://mise.jdx.dev/install.sh | sh
+   mise install
+   ```
 
-This will install the Mise tool which manages Tuist versions, and then install
-the specific Tuist version for this project based on the `.mise.toml` file.
+3. **Install dependencies and generate project**:
 
-3- Install project dependencies by running:
+   ```sh
+   tuist install
+   tuist generate
+   ```
 
-```sh
-tuist install
-```
+4. **Open and build**:
 
-This will fetch and install all Swift Package Manager dependencies defined in
-the project's `Package.swift`.
-
-4- Generate the Xcode project by running:
-
-```sh
-tuist generate
-```
-
-This will generate the Xcode project and workspace from the Tuist project models.
-
-You can now open `App.xcworkspace` in Xcode and build/run the project.
-
-#### Update Tuist Version
-
-If you need to update the Tuist version, you can run:
-
-```sh
-mise up --bump
-```
+   ```sh
+   open App.xcworkspace
+   ```
 
 ## Project Architecture
 
 This project is organized into multiple modules:
 
 - **App**: The main iOS/macOS application targets that depend on Core, Components, and feature modules
-- **Core**: Business logic, data models, and external dependencies
+- **Core**: Business logic, data models, and shared utilities
 - **Components**: Reusable SwiftUI components with no external dependencies for maximum portability
-- **Indigo**: Core TCA infrastructure and shared utilities for feature modules
 - **FeatureA** and **FeatureB**: Example TCA-based feature modules with their respective reducers and views
 
 ### Dependency Graph
 
 ```
 App
-├── Core (business logic + external dependencies)
+├── Core (business logic)
 ├── Components (reusable UI components, no dependencies)
-├── FeatureA (TCA-based feature → Indigo)
-└── FeatureB (TCA-based feature → Indigo)
+├── FeatureA (TCA-based feature)
+├── FeatureB (TCA-based feature)
+└── External packages (via .indigoFoundation helper)
 
-Indigo (TCA shared utilities)
+Core → External packages (via .indigoFoundation helper)
+FeatureA/FeatureB → External packages (via .indigoFoundation helper)
+Components → (no dependencies)
 ```
 
-This architecture ensures that:
+**Key architectural benefits:**
 
-- UI components remain reusable across different projects
-- Business logic is separated from presentation
-- External dependencies are contained within the Core module
-- Feature modules follow consistent naming conventions (XFeature, XView)
-- TCA infrastructure is shared through Indigo
+- Clean separation of concerns with clear module boundaries
+- Reusable UI components with no external dependencies
+- Centralized dependency management preventing double-linking issues
+- Consistent naming conventions (XFeature reducers, XView views)
 
-### Project Settings
+## Working with Dependencies
 
-- `OTHER_LDFLAGS` is set to `-ObjC` to allow Objective-C dependencies.
+### The `.indigoFoundation` Helper
 
-### Updating Dependencies
+External dependencies are managed through a centralized helper in `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`. This prevents double-linking and makes dependency management easier.
 
-If you make changes to the `Package.swift` to add/update dependencies, re-run:
+**Usage:**
+
+```swift
+// Single target
+let project = Project.framework(
+  name: "Core",
+  dependencies: .indigoFoundation
+)
+
+// Combined with local dependencies
+dependencies: [
+  .project(target: "Core", path: .relativeToRoot("Core"))
+] + .indigoFoundation
+```
+
+### Adding New Dependencies
+
+1. Add package to `Package.swift` dependencies
+2. Mark as `.framework` in `productTypes` if shared across targets
+3. Add to `.indigoFoundation` helper in `Project+Templates.swift`
+4. Install and validate:
+
+   ```sh
+   tuist install
+   tuist generate
+   tuist inspect implicit-imports
+   tuist inspect redundant-imports
+   ```
+
+### Making Project Changes
+
+After modifying Tuist project files (e.g., adding targets):
 
 ```sh
-tuist install
 tuist generate
 ```
 
-### Editing Project Models
-
-If you make changes to the Tuist project models (e.g. adding a new target), re-run to generate the Xcode project:
+To update Tuist itself:
 
 ```sh
-tuist generate
+mise up --bump
 ```
 
-### Targets
+## Included Modules
 
-The project contains the following targets:
+All targets support iOS 26.0+ and macOS 26.0+.
 
-#### Target: App
+- **App** - Main application with example screens
+- **Core** - Business logic and shared utilities
+- **Components** - Dependency-free reusable UI components
+- **FeatureA/FeatureB** - Example TCA feature modules (counter and todo list)
 
-- **Type**: iOS/macOS Application
-- **Deployment Target**: iOS 18.0, macOS 15.0
-- **Dependencies**:
-  - Core (business logic and data layer)
-  - Components (reusable UI components)
-  - FeatureA (counter feature example)
-  - FeatureB (todo list feature example)
-
-#### Target: Core
-
-- **Type**: Framework
-- **Deployment Target**: iOS 18.0, macOS 15.0
-- **Purpose**: Contains business logic, data models, and external dependencies
-- **Dependencies**: None (simplified from previous dependencies)
-
-#### Target: Components
-
-- **Type**: Framework
-- **Deployment Target**: iOS 18.0, macOS 15.0
-- **Purpose**: Reusable SwiftUI components with no external dependencies
-- **Dependencies**: None (intentionally kept dependency-free for maximum reusability)
-
-#### Target: Indigo
-
-- **Type**: Framework
-- **Deployment Target**: iOS 18.0, macOS 15.0
-- **Purpose**: Shared TCA infrastructure and utilities for feature modules
-- **Dependencies**: ComposableArchitecture, other TCA-related packages
-
-#### Target: FeatureA
-
-- **Type**: Framework
-- **Deployment Target**: iOS 18.0, macOS 15.0
-- **Purpose**: Example counter feature using TCA
-- **Dependencies**: Indigo
-- **Main Types**: FeatureAFeature (reducer), FeatureAView (SwiftUI view)
-
-#### Target: FeatureB
-
-- **Type**: Framework
-- **Deployment Target**: iOS 18.0, macOS 15.0
-- **Purpose**: Example todo list feature using TCA
-- **Dependencies**: Indigo
-- **Main Types**: FeatureBFeature (reducer), FeatureBView (SwiftUI view)
-
-### Schemes
-
-The project includes the following schemes:
-
-#### Scheme: App Debug
-
-- **Configuration**: Debug
-- **Purpose**: Development and debugging
-- All actions (Run, Archive, Profile, Analyze) use the Debug configuration
-
-#### Scheme: App
-
-- **Configuration**: Release
-- **Purpose**: Production builds
-- All actions (Run, Archive, Profile, Analyze) use the Release configuration
+Two schemes are provided: **App** (Release) and **App Debug** (Debug configuration).
