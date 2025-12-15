@@ -4,69 +4,88 @@
 #if TUIST
   import ProjectDescription
 
-  let packageSettings = PackageSettings(
-    // Customize the product types for specific package product
-    // Default is .staticFramework
-    // productTypes: ["Alamofire": .framework,]
-    productTypes: [
-      "Algorithms": .framework,
-      "BitCollections": .framework,
-      "CasePaths": .framework,
-      "CasePathsCore": .framework,
-      "Clocks": .framework,
-      "Collections": .framework,
-      "CombineSchedulers": .framework,
-      "ComposableArchitecture": .framework,
-      "ComposableToasts": .framework,
-      "ConcurrencyExtras": .framework,
-      "CustomDump": .framework,
-      "Dependencies": .framework,
-      "DependenciesMacros": .framework,
-      "DequeModule": .framework,
-      "FileLogger": .framework,
-      "GRDB": .framework,
-      "GRDBSQLite": .framework,
-      "HTTPRequestBuilder": .framework,
-      "HTTPRequestClient": .framework,
-      "HeapModule": .framework,
-      "IdentifiedCollections": .framework,
-      "InternalCollectionsUtilities": .framework,
-      "IssueReporting": .framework,
-      "IssueReportingPackageSupport": .framework,
-      "JWTAuth": .framework,
-      "JWTDecode": .framework,
-      "Logging": .framework,
-      "LoggingClient": .framework,
-      "NetworkImage": .framework,
-      "OrderedCollections": .framework,
-      "Perception": .framework,
-      "PerceptionCore": .framework,
-      "Pulse": .framework,
-      "PulseUI": .framework,
-      "RealModule": .framework,
-      "Sharing": .framework,
-      "SimpleKeychain": .framework,
-      "SQLiteData": .framework,
-      "SwiftNavigation": .framework,
-      "SwiftUINavigation": .framework,
-      "UIKitNavigation": .framework,
-      "UIKitNavigationShim": .framework,
-      "XCTestDynamicOverlay": .framework
-    ],
-    // To avoid collision with Apple's own Sharing framework when linked dynamically
-    targetSettings: [
-      "ComposableArchitecture": .settings(
+  func frameworkProductTypes(
+    _ products: [String]
+  ) -> [String: ProjectDescription.Product] {
+    products.reduce(into: [:]) { result, product in
+      result[product] = .framework
+    }
+  }
+
+  func sharingTargetSettings(
+    _ targets: [String]
+  ) -> [String: ProjectDescription.Settings] {
+    var settings: [String: ProjectDescription.Settings] = [:]
+
+    // Always add Sharing with its special settings
+    settings["Sharing"] = .settings(
+      base: [
+        "PRODUCT_NAME": "SwiftSharing",
+        "OTHER_SWIFT_FLAGS": ["-module-alias", "Sharing=SwiftSharing"]
+      ]
+    )
+
+    // Add other targets with just the module-alias flag
+    for target in targets where target != "Sharing" {
+      settings[target] = .settings(
         base: [
-          "OTHER_SWIFT_FLAGS": ["-module-alias", "Sharing=SwiftSharing"]
-        ]
-      ),
-      "Sharing": .settings(
-        base: [
-          "PRODUCT_NAME": "SwiftSharing",
           "OTHER_SWIFT_FLAGS": ["-module-alias", "Sharing=SwiftSharing"]
         ]
       )
-    ]
+    }
+
+    return settings
+  }
+
+  let packageSettings = PackageSettings(
+    productTypes: frameworkProductTypes([
+      "Algorithms",
+      "BitCollections",
+      "CasePaths",
+      "CasePathsCore",
+      "Clocks",
+      "Collections",
+      "CombineSchedulers",
+      "ComposableArchitecture",
+      "ComposableToasts",
+      "ConcurrencyExtras",
+      "CustomDump",
+      "Dependencies",
+      "DependenciesMacros",
+      "DequeModule",
+      "FileLogger",
+      "GRDB",
+      "GRDBSQLite",
+      "HTTPRequestBuilder",
+      "HTTPRequestClient",
+      "HeapModule",
+      "IdentifiedCollections",
+      "InternalCollectionsUtilities",
+      "IssueReporting",
+      "IssueReportingPackageSupport",
+      "JWTAuth",
+      "JWTDecode",
+      "Logging",
+      "LoggingClient",
+      "NetworkImage",
+      "OrderedCollections",
+      "Perception",
+      "PerceptionCore",
+      "Pulse",
+      "PulseUI",
+      "RealModule",
+      "Sharing",
+      "SimpleKeychain",
+      "SQLiteData",
+      "SwiftNavigation",
+      "SwiftUINavigation",
+      "UIKitNavigation",
+      "UIKitNavigationShim",
+      "XCTestDynamicOverlay"
+    ]),
+    targetSettings: sharingTargetSettings([
+      "ComposableArchitecture"
+    ])
   )
 #endif
 
