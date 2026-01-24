@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Core
 import Dependencies
+import NotesListFeature
 import SQLiteData
 import SwiftUI
 
