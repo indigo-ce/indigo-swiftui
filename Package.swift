@@ -4,6 +4,15 @@
 #if TUIST
   import ProjectDescription
 
+  // Use the value returned by this function to set the product type of your targets.
+  func productType() -> ProjectDescription.Product {
+    if case .string(let linking) = Environment.linking {
+      return linking == "static" ? .staticFramework : .framework
+    } else {
+      return .framework
+    }
+  }
+
   func frameworkProductTypes(
     _ products: [String]
   ) -> [String: ProjectDescription.Product] {
@@ -67,7 +76,6 @@
       "JWTDecode",
       "Logging",
       "LoggingClient",
-      "NetworkImage",
       "OrderedCollections",
       "Perception",
       "PerceptionCore",
@@ -84,7 +92,9 @@
       "XCTestDynamicOverlay"
     ]),
     targetSettings: sharingTargetSettings([
-      "ComposableArchitecture"
+      "ComposableArchitecture",
+      "JWTAuth",
+      "SQLiteData"
     ])
   )
 #endif
@@ -97,8 +107,6 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-log", from: "1.6.3"),
     .package(url: "https://github.com/auth0/JWTDecode.swift", from: "3.3.0"),
     .package(url: "https://github.com/auth0/SimpleKeychain", from: "1.3.0"),
-    .package(url: "https://github.com/gonzalezreal/NetworkImage", from: "6.0.1"),
-    .package(url: "https://github.com/groue/GRDB.swift", from: "7.6.0"),
     .package(url: "https://github.com/indigo-ce/composable-toasts", from: "1.1.0"),
     .package(url: "https://github.com/indigo-ce/http-request-builder", from: "1.0.3"),
     .package(url: "https://github.com/indigo-ce/http-request-client", from: "1.4.0"),

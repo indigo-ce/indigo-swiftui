@@ -4,14 +4,22 @@ extension Array where Element == TargetDependency {
   public static var indigoFoundation: [TargetDependency] {
     [
       .external(name: "Algorithms"),
+      .external(name: "Collections"),
       .external(name: "ComposableArchitecture"),
       .external(name: "ComposableToasts"),
       .external(name: "Dependencies"),
-      .external(name: "DependenciesMacros"),
       .external(name: "GRDB"),
-      .external(name: "NetworkImage"),
-      .external(name: "Pulse"),
+      .external(name: "HTTPRequestBuilder"),
+      .external(name: "HTTPRequestClient"),
+      .external(name: "JWTAuth"),
+      .external(name: "JWTDecode"),
+      .external(name: "Logging"),
+      .external(name: "LoggingClient"),
+      .external(name: "Perception"),
       .external(name: "PulseUI"),
+      .external(name: "Sharing"),
+      .external(name: "SQLiteData"),
+      .external(name: "SimpleKeychain"),
       .external(name: "SwiftNavigation")
     ]
   }
@@ -42,7 +50,12 @@ extension Project {
           deploymentTargets: .platforms,
           sources: ["Sources/**"],
           resources: ["Resources/**"],
-          dependencies: dependencies
+          dependencies: dependencies,
+          settings: .settings(
+            base: [
+              "DEFINES_MODULE": "NO"
+            ]
+          )
         ),
         .target(
           name: "\(name)Tests",

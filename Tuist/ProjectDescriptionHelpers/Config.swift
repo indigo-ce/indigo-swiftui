@@ -1,4 +1,4 @@
 import ProjectDescription
 
-public let teamReverseDomain = "net.4rays"
+public let teamReverseDomain = "com.example"
 public let appTarget: TargetReference = "Indigo"

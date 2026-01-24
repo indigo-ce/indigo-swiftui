@@ -3,5 +3,6 @@ import ProjectDescriptionHelpers
 
 let project = Project.framework(
   name: "Core",
-  dependencies: .indigoFoundation
+  dependencies: .indigoFoundation,
+  testDependencies: .indigoFoundation
 )
