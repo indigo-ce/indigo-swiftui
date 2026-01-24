@@ -29,8 +29,7 @@ let project = Project(
       dependencies: [
         .project(target: "Core", path: .relativeToRoot("Core")),
         .project(target: "Components", path: .relativeToRoot("Components")),
-        .project(target: "FeatureA", path: .relativeToRoot("FeatureA")),
-        .project(target: "FeatureB", path: .relativeToRoot("FeatureB"))
+        .project(target: "NotesListFeature", path: .relativeToRoot("NotesListFeature"))
       ] + .indigoFoundation,
       settings: .settings(
         base: [
@@ -56,7 +55,9 @@ let project = Project(
       name: appTarget.targetName,
       shared: true,
       buildAction: .buildAction(targets: [appTarget]),
-      testAction: .testPlans([.relativeToManifest("All.xctestplan")]),
+      testAction: .targets([
+        "\(appTarget.targetName)Tests"
+      ]),
       runAction: .runAction(
         configuration: "Debug",
         executable: appTarget

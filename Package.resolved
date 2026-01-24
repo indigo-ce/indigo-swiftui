@@ -1,5 +1,5 @@
 {
-  "originHash" : "72d0e2274816365f5a62d7f2088217c70f05c282eb2b2941b91e9f621cfed743",
+  "originHash" : "56487f6dc809c4833c28f965a37a9bcee98b853a572f2822722f81324ec6e905",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -71,15 +71,6 @@
       "state" : {
         "revision" : "7f319b9e887303fbd49dbe1533e57f0104de16b4",
         "version" : "2.0.0"
-      }
-    },
-    {
-      "identity" : "networkimage",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/gonzalezreal/NetworkImage",
-      "state" : {
-        "revision" : "2849f5323265386e200484b0d0f896e73c3411b9",
-        "version" : "6.0.1"
       }
     },
     {
