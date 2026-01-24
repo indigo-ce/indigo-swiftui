@@ -37,7 +37,8 @@ extension NotesClient: DependencyKey {
       update: { note in
         var updated = note
         updated.updatedAt = Date()
-        try await database.write { db in
+
+        try await database.write { [updated] db in
           try Note.upsert { Note.Draft(updated) }.execute(db)
         }
       },

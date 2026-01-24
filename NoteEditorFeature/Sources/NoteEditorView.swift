@@ -46,6 +46,7 @@ public struct NoteEditorFeature: Sendable {
     case cancelButtonTapped
     case saveCompleted(Result<Void, Error>)
     case deleteCompleted(Result<Void, Error>)
+    case dismissError
   }
 
   @Dependency(\.notesClient) var notesClient
@@ -112,6 +113,10 @@ public struct NoteEditorFeature: Sendable {
         state.isSaving = false
         state.errorMessage = error.localizedDescription
         return .none
+
+      case .dismissError:
+        state.errorMessage = nil
+        return .none
       }
     }
   }
@@ -153,8 +158,16 @@ public struct NoteEditorView: View {
         .disabled(store.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isSaving)
       }
     }
-    .alert("Error", isPresented: .constant(store.errorMessage != nil)) {
-      Button("OK") {}
+    .alert(
+      "Error",
+      isPresented: Binding(
+        get: { store.errorMessage != nil },
+        set: { if !$0 { store.send(.dismissError) } }
+      )
+    ) {
+      Button("OK") {
+        store.send(.dismissError)
+      }
     } message: {
       Text(store.errorMessage ?? "")
     }

@@ -30,8 +30,9 @@ tuist generate --no-open
 # Open the workspace
 open Indigo.xcworkspace
 
-# Run tests
-tuist test
+# Run tests (specify platform)
+tuist test --platform ios
+tuist test --platform macos
 ```
 
 ## Architecture Overview

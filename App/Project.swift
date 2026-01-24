@@ -55,7 +55,9 @@ let project = Project(
       name: appTarget.targetName,
       shared: true,
       buildAction: .buildAction(targets: [appTarget]),
-      testAction: .testPlans([.relativeToManifest("All.xctestplan")]),
+      testAction: .targets([
+        "\(appTarget.targetName)Tests"
+      ]),
       runAction: .runAction(
         configuration: "Debug",
         executable: appTarget
