@@ -53,7 +53,8 @@ extension Project {
           dependencies: dependencies,
           settings: .settings(
             base: [
-              "DEFINES_MODULE": "NO"
+              "DEFINES_MODULE": "NO",
+              "SWIFT_VERSION": "6.0"
             ]
           )
         ),

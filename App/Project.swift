@@ -35,7 +35,8 @@ let project = Project(
         base: [
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": .string("mac.entitlements"),
           "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": .string("ios.entitlements"),
-          "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": .string("ios.entitlements")
+          "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": .string("ios.entitlements"),
+          "SWIFT_VERSION": "6.0"
         ]
       )
     ),
