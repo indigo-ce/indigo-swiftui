@@ -24,8 +24,7 @@ let project = Project(
           ]
         ]
       ),
-      sources: ["Sources/**"],
-      resources: ["Resources/**"],
+      buildableFolders: [.folder("Sources"), .folder("Resources")],
       dependencies: [
         .project(target: "Core", path: .relativeToRoot("Core")),
         .project(target: "Components", path: .relativeToRoot("Components")),
@@ -45,7 +44,7 @@ let project = Project(
       destinations: .destinations,
       product: .unitTests,
       bundleId: "\(teamReverseDomain).\(appTarget.targetName)Tests",
-      sources: ["Tests/**"],
+      buildableFolders: [.folder("Tests")],
       dependencies: [
         .target(name: appTarget.targetName)
       ]

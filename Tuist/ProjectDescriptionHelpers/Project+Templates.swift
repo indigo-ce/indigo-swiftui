@@ -48,8 +48,7 @@ extension Project {
           product: .framework,
           bundleId: "\(reverseDomain).\(name)",
           deploymentTargets: .platforms,
-          sources: ["Sources/**"],
-          resources: ["Resources/**"],
+          buildableFolders: [.folder("Sources"), .folder("Resources")],
           dependencies: dependencies,
           settings: .settings(
             base: [
@@ -63,8 +62,7 @@ extension Project {
           destinations: .destinations,
           product: .unitTests,
           bundleId: "\(reverseDomain).\(name)Tests",
-          sources: ["Tests/**"],
-          resources: ["Tests/Resources/**"],
+          buildableFolders: [.folder("Tests")],
           dependencies: [.target(name: name)] + testDependencies,
         )
       ]
