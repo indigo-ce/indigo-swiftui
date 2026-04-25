@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "using-tuist-generated-projects": {
+      "source": "tuist/agent-skills",
+      "sourceType": "github",
+      "computedHash": "333f414afa906998e8e006fd346abab7d1b65d0ac2835e9fe466ae99f6d7d502"
+    },
+    "xbridge": {
+      "source": "4rays/xbridge-skill",
+      "sourceType": "github",
+      "computedHash": "5cd66c77e47302760c5d4439d416f0f5913a14ed86bde5f555699c99e5c16460"
+    }
+  }
+}
