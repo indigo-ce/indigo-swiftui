@@ -33,6 +33,14 @@ A modular SwiftUI template using [Tuist](https://tuist.dev/) and [The Composable
    open App.xcworkspace
    ```
 
+## Skills (Optional)
+
+Install xbridge for Xcode integration:
+
+```sh
+npx skills add https://github.com/4rays/xbridge
+```
+
 ## Project Architecture
 
 This project is organized into multiple modules:
