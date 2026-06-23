@@ -37,6 +37,7 @@ extension Project {
       settings: .settings(
         base: [
           "ENABLE_MODULE_VERIFIER": "YES",
+          "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
           "MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS": "gnu11 gnu++14",
           "STRING_CATALOG_GENERATE_SYMBOLS": "YES"
         ]
