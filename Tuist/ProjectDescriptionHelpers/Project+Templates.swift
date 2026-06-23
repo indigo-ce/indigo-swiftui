@@ -30,9 +30,18 @@ extension Project {
     name: String,
     reverseDomain: String = teamReverseDomain,
     dependencies: [TargetDependency] = [],
-    testDependencies: [TargetDependency] = []
+    testDependencies: [TargetDependency] = [],
+    usesSharing: Bool = false
   ) -> Project {
-    .init(
+    var baseSettings: SettingsDictionary = [
+      "DEFINES_MODULE": "NO",
+      "SWIFT_VERSION": "6.0"
+    ]
+    if usesSharing {
+      baseSettings["OTHER_SWIFT_FLAGS"] = "$(inherited) -module-alias Sharing=SwiftSharing"
+    }
+
+    return .init(
       name: name,
       settings: .settings(
         base: [
@@ -49,13 +58,11 @@ extension Project {
           product: .framework,
           bundleId: "\(reverseDomain).\(name)",
           deploymentTargets: .platforms,
-          buildableFolders: [.folder("Sources"), .folder("Resources")],
+          sources: ["Sources/**"],
+          resources: ["Resources/**"],
           dependencies: dependencies,
           settings: .settings(
-            base: [
-              "DEFINES_MODULE": "NO",
-              "SWIFT_VERSION": "6.0"
-            ]
+            base: baseSettings
           )
         ),
         .target(
@@ -63,8 +70,9 @@ extension Project {
           destinations: .destinations,
           product: .unitTests,
           bundleId: "\(reverseDomain).\(name)Tests",
-          buildableFolders: [.folder("Tests")],
-          dependencies: [.target(name: name)] + testDependencies,
+          sources: ["Tests/**"],
+          resources: ["Tests/Resources/**"],
+          dependencies: [.target(name: name)] + testDependencies
         )
       ]
     )
@@ -74,8 +82,8 @@ extension Project {
 extension ProjectDescription.DeploymentTargets {
   public static var platforms: DeploymentTargets {
     .multiplatform(
-      iOS: "26.0",
-      macOS: "26.0",
+      iOS: "18.0",
+      macOS: "15.0",
       watchOS: nil,
       tvOS: nil,
       visionOS: nil
