@@ -69,8 +69,14 @@ graph.png
 
 ### SPM ###
 .build/
+**/.build/
 .index-build/
-.claude/settings.local.json
+/Packages
+.swiftpm/config/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+*.db-shm
+*.db-wal
 
 ## VS Code
 .vscode/
