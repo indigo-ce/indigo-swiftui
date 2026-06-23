@@ -82,8 +82,8 @@ extension Project {
 extension ProjectDescription.DeploymentTargets {
   public static var platforms: DeploymentTargets {
     .multiplatform(
-      iOS: "18.0",
-      macOS: "15.0",
+      iOS: "26.0",
+      macOS: "26.0",
       watchOS: nil,
       tvOS: nil,
       visionOS: nil
