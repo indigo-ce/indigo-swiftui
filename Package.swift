@@ -14,10 +14,11 @@
   }
 
   func frameworkProductTypes(
-    _ products: [String]
+    _ products: [String],
+    override: [String: ProjectDescription.Product] = [:]
   ) -> [String: ProjectDescription.Product] {
     products.reduce(into: [:]) { result, product in
-      result[product] = .framework
+      result[product] = override[product] ?? .framework
     }
   }
 
@@ -90,6 +91,8 @@
       "UIKitNavigation",
       "UIKitNavigationShim",
       "XCTestDynamicOverlay"
+    ], override: [
+      "CasePaths": .staticFramework
     ]),
     targetSettings: sharingTargetSettings([
       "ComposableArchitecture",
