@@ -7,9 +7,9 @@
   // Use the value returned by this function to set the product type of your targets.
   func productType() -> ProjectDescription.Product {
     if case .string(let linking) = Environment.linking {
-      return linking == "static" ? .staticFramework : .framework
+      return linking == "dynamic" ? .framework : .staticFramework
     } else {
-      return .framework
+      return .staticFramework
     }
   }
 
