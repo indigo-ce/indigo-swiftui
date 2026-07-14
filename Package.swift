@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.3
 @preconcurrency import PackageDescription
 
 #if TUIST
@@ -121,5 +121,6 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.10"),
     .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.9.0"),
     .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.10.1")
-  ]
+  ],
+  swiftLanguageModes: [.v6]
 )
