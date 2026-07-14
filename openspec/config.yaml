@@ -1,0 +1,18 @@
+schema: spec-driven
+
+# Project context shown to AI when creating artifacts (proposals, designs, tasks).
+context: |
+  Indigo is a SwiftUI app template targeting iOS 26+ / macOS 26+.
+  Stack: The Composable Architecture (TCA), SQLiteData (GRDB-based), SwiftSharing,
+  JWTAuth, HTTPRequestBuilder/Client, Tuist for project generation.
+  Modules: App (features + entry point), Core (models, database, clients),
+  Components (dependency-free reusable UI).
+  Conventions: Swift 6 strict concurrency; `XFeature` reducers + `XView` views;
+  2-space indentation; conventional-ish commit subjects.
+
+# Per-artifact rules (optional). Uncomment and adapt as the project grows.
+# rules:
+#   proposal:
+#     - Always include a "Non-goals" section
+#   tasks:
+#     - Break tasks into chunks of max ~2 hours

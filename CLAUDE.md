@@ -184,6 +184,17 @@ Configuration is split between two files in `Tuist/ProjectDescriptionHelpers/`:
 
 The app targets iOS and macOS with shared codebase. Separate entitlements are configured for each platform in `App/ios.entitlements` and `App/mac.entitlements`.
 
+## Spec-Driven Changes (OpenSpec)
+
+Non-trivial features and behavior changes are tracked with [OpenSpec](https://github.com/Fission-AI/OpenSpec) under `openspec/`:
+
+- `openspec/specs/` — the current, agreed-upon behavior (the source of truth).
+- `openspec/changes/` — in-flight change proposals, each with `proposal.md`, `design.md`, `tasks.md`, and delta specs.
+- `openspec/changes/archive/` — completed changes, retained for history.
+- `openspec/config.yaml` — project context injected into generated artifacts.
+
+Typical loop: **propose → design → tasks → implement → archive**. Use the OpenSpec skills (`openspec-propose`, `openspec-apply-change`, `openspec-archive-change`, `openspec-verify-change`) rather than hand-authoring the structure.
+
 ## Development Workflow
 
 ### After Dependency Changes
