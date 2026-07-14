@@ -10,7 +10,7 @@ A modular SwiftUI template using [Tuist](https://tuist.dev/) and [The Composable
 
    ```swift
    public let teamReverseDomain = "com.yourcompany"
-   public let appName: TargetReference = "YourApp"
+   public let appTarget: TargetReference = "YourApp"
    ```
 
 2. **Install Tuist**:
@@ -30,7 +30,7 @@ A modular SwiftUI template using [Tuist](https://tuist.dev/) and [The Composable
 4. **Open and build**:
 
    ```sh
-   open App.xcworkspace
+   open Indigo.xcworkspace
    ```
 
 ## Skills (Optional)
@@ -48,7 +48,7 @@ This project is organized into multiple modules:
 - **App**: The main iOS/macOS application targets that depend on Core, Components, and feature modules
 - **Core**: Business logic, data models, and shared utilities
 - **Components**: Reusable SwiftUI components with no external dependencies for maximum portability
-- **FeatureA** and **FeatureB**: Example TCA-based feature modules with their respective reducers and views
+- **NotesListFeature** and **NoteEditorFeature**: Example TCA-based feature modules with their respective reducers and views
 
 ### Dependency Graph
 
@@ -56,12 +56,12 @@ This project is organized into multiple modules:
 App
 ├── Core (business logic)
 ├── Components (reusable UI components, no dependencies)
-├── FeatureA (TCA-based feature)
-├── FeatureB (TCA-based feature)
+├── NotesListFeature (TCA-based feature)
+├── NoteEditorFeature (TCA-based feature)
 └── External packages (via .indigoFoundation helper)
 
 Core → External packages (via .indigoFoundation helper)
-FeatureA/FeatureB → External packages (via .indigoFoundation helper)
+NotesListFeature/NoteEditorFeature → External packages (via .indigoFoundation helper)
 Components → (no dependencies)
 ```
 
@@ -125,9 +125,9 @@ mise up --bump
 
 All targets support iOS 26.0+ and macOS 26.0+.
 
-- **App** - Main application with example screens
-- **Core** - Business logic and shared utilities
+- **App** - Main application with an example notes screen
+- **Core** - Business logic, database, models, and shared clients
 - **Components** - Dependency-free reusable UI components
-- **FeatureA/FeatureB** - Example TCA feature modules (counter and todo list)
+- **NotesListFeature/NoteEditorFeature** - Example TCA feature modules (a note-taking flow)
 
-Two schemes are provided: **App** (Release) and **App Debug** (Debug configuration).
+Schemes: **Indigo** (Debug) and **Indigo Release** run the app; **AllTests** runs every module's test suite.
