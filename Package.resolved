@@ -1,5 +1,5 @@
 {
-  "originHash" : "a2be56fbe18a726daf6d145e544a4e05391b39427fc895c63c2983a1179d7141",
+  "originHash" : "49e2141179dc315f13904a7c05d007037442e8a741a7dd79734e712064222678",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -51,8 +51,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/indigo-ce/jwt-auth-client",
       "state" : {
-        "revision" : "c072a90838c47ca475e950c258b6fca6013b2052",
-        "version" : "1.4.0"
+        "revision" : "c6176799fe2fbf94b70a5aa79c1f2e62c000a4fb",
+        "version" : "2.0.0"
       }
     },
     {

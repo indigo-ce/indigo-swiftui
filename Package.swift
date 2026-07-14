@@ -110,7 +110,7 @@ let package = Package(
     .package(url: "https://github.com/indigo-ce/composable-toasts", from: "1.1.2"),
     .package(url: "https://github.com/indigo-ce/http-request-builder", from: "1.0.3"),
     .package(url: "https://github.com/indigo-ce/http-request-client", from: "1.6.0"),
-    .package(url: "https://github.com/indigo-ce/jwt-auth-client", from: "1.4.0"),
+    .package(url: "https://github.com/indigo-ce/jwt-auth-client", from: "2.0.0"),
     .package(url: "https://github.com/indigo-ce/logging-client", from: "2.0.0"),
     .package(url: "https://github.com/indigo-ce/swift-file-logger", from: "0.9.1"),
     .package(url: "https://github.com/kean/Pulse", from: "5.2.3"),
