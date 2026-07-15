@@ -52,7 +52,7 @@ ProjectRoot/
 import ProjectDescription
 
 public let teamReverseDomain = "com.yourcompany"  // Replace with your reverse domain
-public let appName: TargetReference = "YourApp"   // Replace with your app name
+public let appTarget: TargetReference = "YourApp"  // Replace with your app name
 ```
 
 These values will be used throughout the project configuration to set bundle identifiers, target names, and other project-specific settings.
@@ -65,7 +65,7 @@ curl https://mise.jdx.dev/install.sh | sh
 
 # Create mise.toml file
 echo '[tools]
-tuist = "4.54.3"' > mise.toml
+tuist = "4.200.5"' > mise.toml
 
 # Install Tuist
 mise install
@@ -440,7 +440,7 @@ let project = Project.framework(
 
 #### D. Create Feature Modules (Optional)
 
-> **Note**: FeatureA and FeatureB are example feature modules provided as reference implementations. In your actual project, you should create feature modules that correspond to your application's specific functionality (e.g., UserProfile, ShoppingCart, Settings, etc.).
+> **Note**: NotesListFeature and NoteEditorFeature are example feature modules provided as reference implementations. In your actual project, you should create feature modules that correspond to your application's specific functionality (e.g., UserProfile, ShoppingCart, Settings, etc.).
 
 For TCA-based feature modules, create individual feature projects based on your app's requirements:
 
@@ -543,7 +543,7 @@ tuist install
 tuist generate
 
 # Open the generated workspace
-open App.xcworkspace
+open YourApp.xcworkspace
 ```
 
 ### Step 10: Gradual Refactoring (Post-Migration)
