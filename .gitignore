@@ -84,3 +84,4 @@ buildServer.json
 
 ## Local files
 .local/
+Configs/Local.xcconfig
