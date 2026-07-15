@@ -1,0 +1,8 @@
+// Per-developer local overrides.
+//
+// Copy this file to `Local.xcconfig` in the same folder — that copy is
+// git-ignored, so your personal values are never committed. The Debug and
+// Release xcconfigs pull it in via `#include? "Local.xcconfig"`.
+//
+// Set your Apple Developer Team ID so device builds can be signed:
+DEVELOPMENT_TEAM=YOUR_TEAM_ID
