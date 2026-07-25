@@ -1,9 +1,11 @@
 ---
-argument-hint: "Project Name"
-description: Bootstrap new project from template
+name: bootstrap
+description: Use when the user asks to bootstrap, rename, or initialize a new project from this Indigo template. Triggers include "bootstrap a new project", "rename this project", "initialize from template", or "set up a new app from this template". Takes the new project name (PascalCase, e.g. "MyApp") as input.
 ---
 
-Rename this SwiftUI project template to "$ARGUMENTS". Use the todo list to keep progress trackable.
+# Bootstrap Project from Indigo Template
+
+Rename this SwiftUI project template to the new project name provided by the user. Use the todo list to keep progress trackable.
 
 ## Files to Update
 
