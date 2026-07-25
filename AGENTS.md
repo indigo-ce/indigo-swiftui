@@ -46,6 +46,12 @@ External packages flow through the `.indigoFoundation` helper (prevents double-l
 - **Networking / auth:** `JWTAuthClient+Live` demonstrates the token-refresh contract — map a **401** from `/auth/refresh` to `AuthTokens.Error.refreshRejected` (the only error that wipes credentials); let every other failure propagate so a transient outage doesn't log the user out.
 - Swift 6 strict concurrency; 2-space indentation (see `.swift-format`).
 
+## Agent skills
+
+Project-specific agent skills live under `.agents/skills/<name>/SKILL.md` and are **agent-agnostic** — the same skill works for Claude Code, Codex, Cursor, or any tool that reads the directory. Skills are surfaced to Claude Code via `.claude/skills/<name>` symlinks pointing back into `.agents/skills/`; mirror that pattern (or add a sibling symlink) for any other agent home that needs them.
+
+To add a new skill: create `.agents/skills/<name>/SKILL.md` with `name:` + `description:` frontmatter (the `description:` should include trigger phrases so the agent knows when to load it), then symlink it from `.claude/skills/`.
+
 ## Multi-platform
 
 iOS and macOS share one codebase; per-platform entitlements live in `App/ios.entitlements` and `App/mac.entitlements`.
