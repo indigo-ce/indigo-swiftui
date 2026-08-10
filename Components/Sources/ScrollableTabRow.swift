@@ -29,8 +29,21 @@ public struct ScrollableTabRow<Segment: TabSegment>: View {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 0) {
             ForEach(segments, content: view(for:))
-              .frame(minWidth: geo.size.width / CGFloat(segments.count))
+              .frame(
+                minWidth: segments.isEmpty
+                  ? nil
+                  : geo.size.width / CGFloat(segments.count)
+              )
           }
+          .background {
+            Color.clear
+              .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
+                totalHeight = $0
+              }
+          }
+        }
+        .onAppear {
+          scrollTo(selection, using: proxy)
         }
         .onChange(of: selection) { _, new in
           scrollTo(new, using: proxy)
@@ -62,14 +75,6 @@ public struct ScrollableTabRow<Segment: TabSegment>: View {
         }
         .contentShape(Rectangle())
     }
-    .background(
-      GeometryReader { segmentGeo in
-        Color.clear
-          .onAppear {
-            totalHeight = max(totalHeight, segmentGeo.size.height)
-          }
-      }
-    )
     .id(segment)
     .accessibilityAddTraits(segment.id == selection.id ? .isSelected : [])
     .buttonStyle(.plain)
