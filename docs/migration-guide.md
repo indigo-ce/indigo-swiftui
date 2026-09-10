@@ -115,7 +115,7 @@ let config = Config(project: .tuist())
 #### B. Create `Package.swift`
 
 ```swift
-// swift-tools-version: 6.2
+// swift-tools-version: 6.4
 @preconcurrency import PackageDescription
 
 #if TUIST

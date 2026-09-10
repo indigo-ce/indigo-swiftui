@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.4
 @preconcurrency import PackageDescription
 
 #if TUIST
@@ -104,7 +104,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.1"),
     .package(url: "https://github.com/apple/swift-collections", from: "1.6.0"),
-    .package(url: "https://github.com/apple/swift-log", from: "1.13.2"),
+    .package(url: "https://github.com/apple/swift-log", from: "1.15.1"),
     .package(url: "https://github.com/auth0/JWTDecode.swift", from: "4.0.0"),
     .package(url: "https://github.com/auth0/SimpleKeychain", from: "1.3.0"),
     .package(url: "https://github.com/indigo-ce/composable-toasts", from: "1.1.2"),
@@ -114,15 +114,15 @@ let package = Package(
     .package(url: "https://github.com/indigo-ce/logging-client", from: "2.0.0"),
     .package(url: "https://github.com/indigo-ce/swift-file-logger", from: "0.9.1"),
     .package(url: "https://github.com/kean/Pulse", from: "5.2.3"),
-    .package(url: "https://github.com/pointfreeco/sqlite-data", from: "1.6.6"),
-    .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.0"),
-    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.14.1"),
-    .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.8.0"),
-    .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.10"),
-    .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.9.0"),
-    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.10.1"),
+    .package(url: "https://github.com/pointfreeco/sqlite-data", from: "1.12.0"),
+    .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.2"),
+    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
+    .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.11.2"),
+    .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.12"),
+    .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
+    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.13.1"),
     .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
-    .package(url: "https://github.com/pointfreeco/swift-structured-queries", .upToNextMinor(from: "0.31.3"))
+    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2")
   ],
   swiftLanguageModes: [.v6]
 )
