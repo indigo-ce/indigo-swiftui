@@ -8,7 +8,9 @@ on:
 jobs:
   test-ios:
     name: Test iOS
-    runs-on: macos-26
+    # Xcode 27 preview image: default Xcode ships Swift 6.4+, which the
+    # swift-tools-version in Package.swift requires.
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v4
