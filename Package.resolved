@@ -1,5 +1,5 @@
 {
-  "originHash" : "49e2141179dc315f13904a7c05d007037442e8a741a7dd79734e712064222678",
+  "originHash" : "c42df14dceced04b460a2e623d3d5cc35a59a4fc4f595e7ce45af2d669cc3fce",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/groue/GRDB.swift",
       "state" : {
-        "revision" : "18497b68fdbb3a09528d260a0a0e1e7e61c8c53d",
-        "version" : "7.8.0"
+        "revision" : "b83108d10f42680d78f23fe4d4d80fc88dab3212",
+        "version" : "7.11.1"
       }
     },
     {
@@ -258,8 +258,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/swift-structured-queries",
       "state" : {
-        "revision" : "8da8818fccd9959bd683934ddc62cf45bb65b3c8",
-        "version" : "0.31.1"
+        "revision" : "b59f4424b9050739ac7c2d82e80edf5e6dbb19e8",
+        "version" : "0.31.3"
       }
     },
     {

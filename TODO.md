@@ -8,7 +8,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 1. Pin GRDB and swift-structured-queries as explicit root dependencies
 
-- [ ] **Gap.** `Package.swift` declares `sqlite-data` but not the two packages it
+- [x] **Gap.** `Package.swift` declares `sqlite-data` but not the two packages it
       pulls in, so `Package.resolved` sits at GRDB `7.8.0` and
       swift-structured-queries `0.31.1` — chosen by transitive resolution, not by
       us. `packageSettings.productTypes` already names `GRDB` and `GRDBSQLite`
