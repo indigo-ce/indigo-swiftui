@@ -90,7 +90,12 @@
       "UIKitNavigation",
       "UIKitNavigationShim",
       "XCTestDynamicOverlay"
-    ]),
+    ]).merging(
+      // Swift macro executables cannot link a dynamic framework: force the
+      // macro support product to static linking (see `tuist generate` lint).
+      ["CasePathsMacrosSupport": .staticFramework],
+      uniquingKeysWith: { _, new in new }
+    ),
     targetSettings: sharingTargetSettings([
       "ComposableArchitecture",
       "JWTAuth",
