@@ -120,7 +120,10 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.11.2"),
     .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.12"),
     .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
-    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.13.1"),
+    // Capped below the 1.13 forwarding split: 1.13+ duplicates the
+    // IssueReporting product (see swift-issue-reporting) and trips Tuist's
+    // false-circular-dependency error (tuist/tuist#12846). Revisit on a fix.
+    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", .upToNextMinor(from: "1.11.0")),
     .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
     .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2")
   ],
