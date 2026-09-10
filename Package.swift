@@ -122,7 +122,7 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.9.0"),
     .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.10.1"),
     .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
-    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.31.3")
+    .package(url: "https://github.com/pointfreeco/swift-structured-queries", exact: "0.31.3")
   ],
   swiftLanguageModes: [.v6]
 )
