@@ -5,7 +5,7 @@ This guide provides step-by-step instructions for migrating existing SwiftUI pro
 ## Prerequisites
 
 - Existing SwiftUI project (iOS/macOS)
-- Xcode 26+ compatibility
+- Xcode 27+ compatibility (Swift tools 6.4)
 - Basic understanding of Swift Package Manager
 - Access to project build settings and configurations
 
