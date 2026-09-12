@@ -46,56 +46,57 @@
     return settings
   }
 
+  var productTypes = frameworkProductTypes([
+    "Algorithms",
+    "BitCollections",
+    "CasePaths",
+    "CasePathsCore",
+    "Clocks",
+    "Collections",
+    "CombineSchedulers",
+    "ComposableArchitecture",
+    "ComposableToasts",
+    "ConcurrencyExtras",
+    "CustomDump",
+    "Dependencies",
+    "DependenciesMacros",
+    "DequeModule",
+    "FileLogger",
+    "GRDB",
+    "GRDBSQLite",
+    "HTTPRequestBuilder",
+    "HTTPRequestClient",
+    "HeapModule",
+    "IdentifiedCollections",
+    "InternalCollectionsUtilities",
+    "IssueReporting",
+    "IssueReportingPackageSupport",
+    "JWTAuth",
+    "JWTDecode",
+    "Logging",
+    "LoggingClient",
+    "OrderedCollections",
+    "Perception",
+    "PerceptionCore",
+    "Pulse",
+    "PulseUI",
+    "RealModule",
+    "Sharing",
+    "SimpleKeychain",
+    "SQLiteData",
+    "SwiftNavigation",
+    "SwiftUINavigation",
+    "UIKitNavigation",
+    "UIKitNavigationShim",
+    "XCTestDynamicOverlay"
+  ])
+
+  // Swift macro executables cannot link a dynamic framework: force the
+  // macro support product to static linking (see `tuist generate` lint).
+  productTypes["CasePathsMacrosSupport"] = .staticFramework
+
   let packageSettings = PackageSettings(
-    productTypes: frameworkProductTypes([
-      "Algorithms",
-      "BitCollections",
-      "CasePaths",
-      "CasePathsCore",
-      "Clocks",
-      "Collections",
-      "CombineSchedulers",
-      "ComposableArchitecture",
-      "ComposableToasts",
-      "ConcurrencyExtras",
-      "CustomDump",
-      "Dependencies",
-      "DependenciesMacros",
-      "DequeModule",
-      "FileLogger",
-      "GRDB",
-      "GRDBSQLite",
-      "HTTPRequestBuilder",
-      "HTTPRequestClient",
-      "HeapModule",
-      "IdentifiedCollections",
-      "InternalCollectionsUtilities",
-      "IssueReporting",
-      "IssueReportingPackageSupport",
-      "JWTAuth",
-      "JWTDecode",
-      "Logging",
-      "LoggingClient",
-      "OrderedCollections",
-      "Perception",
-      "PerceptionCore",
-      "Pulse",
-      "PulseUI",
-      "RealModule",
-      "Sharing",
-      "SimpleKeychain",
-      "SQLiteData",
-      "SwiftNavigation",
-      "SwiftUINavigation",
-      "UIKitNavigation",
-      "UIKitNavigationShim",
-      "XCTestDynamicOverlay"
-    ]).merging(
-      // Swift macro executables cannot link a dynamic framework: force the
-      // macro support product to static linking (see `tuist generate` lint).
-      ["CasePathsMacrosSupport": .staticFramework],
-      uniquingKeysWith: { _, new in new }
-    ),
+    productTypes: productTypes,
     targetSettings: sharingTargetSettings([
       "ComposableArchitecture",
       "JWTAuth",
@@ -112,6 +113,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-log", from: "1.15.1"),
     .package(url: "https://github.com/auth0/JWTDecode.swift", from: "4.0.0"),
     .package(url: "https://github.com/auth0/SimpleKeychain", from: "1.3.0"),
+    .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
     .package(url: "https://github.com/indigo-ce/composable-toasts", from: "1.1.2"),
     .package(url: "https://github.com/indigo-ce/http-request-builder", from: "1.0.3"),
     .package(url: "https://github.com/indigo-ce/http-request-client", from: "1.6.0"),
@@ -125,12 +127,16 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.11.2"),
     .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.12"),
     .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
-    // Capped below the 1.13 forwarding split: 1.13+ duplicates the
-    // IssueReporting product (see swift-issue-reporting) and trips Tuist's
-    // false-circular-dependency error (tuist/tuist#12846). Revisit on a fix.
-    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", .upToNextMinor(from: "1.11.0")),
-    .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
-    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2")
+    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2"),
+    // Held at 1.11.x. From 1.13 the IssueReporting product is forwarded to
+    // swift-issue-reporting, which duplicates it in the graph and trips
+    // Tuist's false-circular-dependency error (tuist/tuist#12846). 1.12.x is
+    // untested here, so the floor and the cap sit on the same minor; widen to
+    // "1.11.0"..<"1.13.0" once a resolve can verify 1.12.
+    .package(
+      url: "https://github.com/pointfreeco/xctest-dynamic-overlay",
+      .upToNextMinor(from: "1.11.0")
+    )
   ],
   swiftLanguageModes: [.v6]
 )

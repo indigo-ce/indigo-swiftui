@@ -8,9 +8,10 @@ on:
 jobs:
   test-ios:
     name: Test iOS
-    # Xcode 27 preview image: default Xcode ships Swift 6.4+, which the
-    # swift-tools-version in Package.swift requires.
-    runs-on: xcode-27
+    # Needs an image whose default Xcode ships Swift 6.4+, which the
+    # swift-tools-version in Package.swift requires. Not yet available:
+    # this job cannot go green until GitHub publishes the macos-27 image.
+    runs-on: macos-27
     steps:
       - name: Checkout
         uses: actions/checkout@v4

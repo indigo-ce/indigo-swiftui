@@ -8,7 +8,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 1. Upgrade the Swift toolchain and dependency graph
 
-- [ ] **Gap.** The project is on Swift tools `6.2` with an older locked dependency
+- [x] **Gap.** The project is on Swift tools `6.2` with an older locked dependency
       graph. The database stack has also had compatibility issues across
       `sqlite-data` and `swift-structured-queries` releases, so selectively
       bumping one transitive package is not a reliable maintenance strategy.
@@ -18,12 +18,17 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
   floors to the versions reported by `swift outdated`, and re-resolve
   `Package.resolved`. The database stack should resolve to `sqlite-data 1.12.0`,
   `swift-structured-queries 0.39.2`, and GRDB `7.11.1`.
-- **Acceptance.** `Package.resolved` contains the latest compatible versions;
-  no selective `0.31.x` cap or claim that older GRDB revisions fail to compile
-  remains in this item.
+- **Acceptance.** `Package.swift` declares GRDB and `swift-structured-queries` as
+  root dependencies; `Package.resolved` shows `sqlite-data 1.12.0`,
+  `swift-structured-queries 0.39.2`, and GRDB `7.11.1`.
 - **Validation.** `mise exec -- tuist install`, then
   `mise exec -- tuist generate --no-open`, iOS and macOS builds, and
   `mise exec -- tuist test AllTests`.
+- **Blocked.** Swift tools `6.4` needs Xcode 27, which has not shipped. Until it
+  does, the manifest cannot be parsed locally, so none of the validation above
+  has run and the current `Package.resolved` is hand-written rather than
+  resolver output — re-resolve it before merging. CI is likewise parked on a
+  `macos-27` runner image that does not exist yet.
 
 ### 2. Declare `DependenciesMacros` in `.indigoFoundation`
 
