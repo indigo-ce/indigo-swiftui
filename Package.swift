@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.4
 @preconcurrency import PackageDescription
 
 #if TUIST
@@ -46,51 +46,57 @@
     return settings
   }
 
+  var productTypes = frameworkProductTypes([
+    "Algorithms",
+    "BitCollections",
+    "CasePaths",
+    "CasePathsCore",
+    "Clocks",
+    "Collections",
+    "CombineSchedulers",
+    "ComposableArchitecture",
+    "ComposableToasts",
+    "ConcurrencyExtras",
+    "CustomDump",
+    "Dependencies",
+    "DependenciesMacros",
+    "DequeModule",
+    "FileLogger",
+    "GRDB",
+    "GRDBSQLite",
+    "HTTPRequestBuilder",
+    "HTTPRequestClient",
+    "HeapModule",
+    "IdentifiedCollections",
+    "InternalCollectionsUtilities",
+    "IssueReporting",
+    "IssueReportingPackageSupport",
+    "JWTAuth",
+    "JWTDecode",
+    "Logging",
+    "LoggingClient",
+    "OrderedCollections",
+    "Perception",
+    "PerceptionCore",
+    "Pulse",
+    "PulseUI",
+    "RealModule",
+    "Sharing",
+    "SimpleKeychain",
+    "SQLiteData",
+    "SwiftNavigation",
+    "SwiftUINavigation",
+    "UIKitNavigation",
+    "UIKitNavigationShim",
+    "XCTestDynamicOverlay"
+  ])
+
+  // Swift macro executables cannot link a dynamic framework: force the
+  // macro support product to static linking (see `tuist generate` lint).
+  productTypes["CasePathsMacrosSupport"] = .staticFramework
+
   let packageSettings = PackageSettings(
-    productTypes: frameworkProductTypes([
-      "Algorithms",
-      "BitCollections",
-      "CasePaths",
-      "CasePathsCore",
-      "Clocks",
-      "Collections",
-      "CombineSchedulers",
-      "ComposableArchitecture",
-      "ComposableToasts",
-      "ConcurrencyExtras",
-      "CustomDump",
-      "Dependencies",
-      "DependenciesMacros",
-      "DequeModule",
-      "FileLogger",
-      "GRDB",
-      "GRDBSQLite",
-      "HTTPRequestBuilder",
-      "HTTPRequestClient",
-      "HeapModule",
-      "IdentifiedCollections",
-      "InternalCollectionsUtilities",
-      "IssueReporting",
-      "IssueReportingPackageSupport",
-      "JWTAuth",
-      "JWTDecode",
-      "Logging",
-      "LoggingClient",
-      "OrderedCollections",
-      "Perception",
-      "PerceptionCore",
-      "Pulse",
-      "PulseUI",
-      "RealModule",
-      "Sharing",
-      "SimpleKeychain",
-      "SQLiteData",
-      "SwiftNavigation",
-      "SwiftUINavigation",
-      "UIKitNavigation",
-      "UIKitNavigationShim",
-      "XCTestDynamicOverlay"
-    ]),
+    productTypes: productTypes,
     targetSettings: sharingTargetSettings([
       "ComposableArchitecture",
       "JWTAuth",
@@ -104,9 +110,10 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.1"),
     .package(url: "https://github.com/apple/swift-collections", from: "1.6.0"),
-    .package(url: "https://github.com/apple/swift-log", from: "1.13.2"),
+    .package(url: "https://github.com/apple/swift-log", from: "1.15.1"),
     .package(url: "https://github.com/auth0/JWTDecode.swift", from: "4.0.0"),
     .package(url: "https://github.com/auth0/SimpleKeychain", from: "1.3.0"),
+    .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
     .package(url: "https://github.com/indigo-ce/composable-toasts", from: "1.1.2"),
     .package(url: "https://github.com/indigo-ce/http-request-builder", from: "1.0.3"),
     .package(url: "https://github.com/indigo-ce/http-request-client", from: "1.6.0"),
@@ -114,13 +121,22 @@ let package = Package(
     .package(url: "https://github.com/indigo-ce/logging-client", from: "2.0.0"),
     .package(url: "https://github.com/indigo-ce/swift-file-logger", from: "0.9.1"),
     .package(url: "https://github.com/kean/Pulse", from: "5.2.3"),
-    .package(url: "https://github.com/pointfreeco/sqlite-data", from: "1.6.6"),
-    .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.0"),
-    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.14.1"),
-    .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.8.0"),
-    .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.10"),
-    .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.9.0"),
-    .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", from: "1.10.1")
+    .package(url: "https://github.com/pointfreeco/sqlite-data", from: "1.12.0"),
+    .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.2"),
+    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
+    .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.11.2"),
+    .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.12"),
+    .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
+    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2"),
+    // Held at 1.11.x. From 1.13 the IssueReporting product is forwarded to
+    // swift-issue-reporting, which duplicates it in the graph and trips
+    // Tuist's false-circular-dependency error (tuist/tuist#12846). 1.12.x is
+    // untested here, so the floor and the cap sit on the same minor; widen to
+    // "1.11.0"..<"1.13.0" once a resolve can verify 1.12.
+    .package(
+      url: "https://github.com/pointfreeco/xctest-dynamic-overlay",
+      .upToNextMinor(from: "1.11.0")
+    )
   ],
   swiftLanguageModes: [.v6]
 )

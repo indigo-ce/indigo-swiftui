@@ -6,31 +6,29 @@ Ordered: earlier items unblock later ones. Each is scoped to one focused pull
 request. Validate Swift changes with `mise exec -- tuist generate --no-open`
 followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
-### 1. Pin GRDB and swift-structured-queries as explicit root dependencies
+### 1. Upgrade the Swift toolchain and dependency graph
 
-- [ ] **Gap.** `Package.swift` declares `sqlite-data` but not the two packages it
-      pulls in, so `Package.resolved` sits at GRDB `7.8.0` and
-      swift-structured-queries `0.31.1` — chosen by transitive resolution, not by
-      us. `packageSettings.productTypes` already names `GRDB` and `GRDBSQLite`
-      as framework products, so the workspace links them directly while nothing
-      constrains their versions. Any unrelated dependency bump can slide those
-      two independently of `sqlite-data 1.6.6`, and the combination is a known
-      breakage surface: `sqlite-data`'s CloudKit sources fail to compile against
-      older GRDB / structured-queries revisions.
-- **Desired behavior.** The three packages move as one unit under an explicit,
-  reviewable floor in `Package.swift`.
-- **Scope.** Add `.package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1")`
-  and `.package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.31.3")`
-  to `Package.swift`. Re-resolve and commit the updated `Package.resolved`. Do
-  not remove or reorder existing dependencies, and do not change
-  `swift-tools-version`.
-- **Acceptance.** `Package.resolved` shows GRDB ≥ 7.11.1 and
-  swift-structured-queries ≥ 0.31.3 with `sqlite-data` still at 1.6.6; both new
-  packages appear in `Package.swift`'s dependency list.
+- [x] **Gap.** The project is on Swift tools `6.2` with an older locked dependency
+      graph. The database stack has also had compatibility issues across
+      `sqlite-data` and `swift-structured-queries` releases, so selectively
+      bumping one transitive package is not a reliable maintenance strategy.
+- **Desired behavior.** The template uses Swift tools `6.4` and the latest
+  compatible direct dependencies as one deliberately re-resolved graph.
+- **Scope.** Update `Package.swift` to Swift tools `6.4`, raise direct dependency
+  floors to the versions reported by `swift outdated`, and re-resolve
+  `Package.resolved`. The database stack should resolve to `sqlite-data 1.12.0`,
+  `swift-structured-queries 0.39.2`, and GRDB `7.11.1`.
+- **Acceptance.** `Package.swift` declares GRDB and `swift-structured-queries` as
+  root dependencies; `Package.resolved` shows `sqlite-data 1.12.0`,
+  `swift-structured-queries 0.39.2`, and GRDB `7.11.1`.
 - **Validation.** `mise exec -- tuist install`, then
-  `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`. Confirm
-  `Core` still compiles its `@Table` model and structured-query call sites in
-  `Core/Sources/Models/Note.swift` and `Core/Sources/Clients/NotesClient.swift`.
+  `mise exec -- tuist generate --no-open`, iOS and macOS builds, and
+  `mise exec -- tuist test AllTests`.
+- **Blocked.** Swift tools `6.4` needs Xcode 27, which has not shipped. Until it
+  does, the manifest cannot be parsed locally, so none of the validation above
+  has run and the current `Package.resolved` is hand-written rather than
+  resolver output — re-resolve it before merging. CI is likewise parked on a
+  `macos-27` runner image that does not exist yet.
 
 ### 2. Declare `DependenciesMacros` in `.indigoFoundation`
 
