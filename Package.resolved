@@ -1,5 +1,5 @@
 {
-  "originHash" : "4ce00f071ed104db296769d7d410047bb4b0341ef3eb0c90c19b805278a65ad1",
+  "originHash" : "31fcdd8ee166a91558c5b95b7ebfee47c47fa1bb407f4ded37bfd4f83db9c46a",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -74,18 +74,9 @@
       }
     },
     {
-      "identity" : "opencombine",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/OpenCombine/OpenCombine.git",
-      "state" : {
-        "revision" : "8576f0d579b27020beccbccc3ea6844f3ddfc2c2",
-        "version" : "0.14.0"
-      }
-    },
-    {
       "identity" : "pulse",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/kean/Pulse",
+      "location" : "https://github.com/kean/pulse.git",
       "state" : {
         "revision" : "94b92731d370c129bb771e9c18f69b0a44ccca5c",
         "version" : "5.2.3"
@@ -191,15 +182,6 @@
       }
     },
     {
-      "identity" : "swift-docc-plugin",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-docc-plugin",
-      "state" : {
-        "revision" : "647c708be89f834fa6a6d4945442793a77ddf5b6",
-        "version" : "1.5.0"
-      }
-    },
-    {
       "identity" : "swift-file-logger",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/indigo-ce/swift-file-logger",
@@ -233,15 +215,6 @@
       "state" : {
         "revision" : "9c6fb14227f55d8f711ce3847dc2f419fb0ecacb",
         "version" : "1.15.1"
-      }
-    },
-    {
-      "identity" : "swift-macro-testing",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/swift-macro-testing",
-      "state" : {
-        "revision" : "0b6bd11ea72e07eec539f2f000efad0b363a90cc",
-        "version" : "0.7.0"
       }
     },
     {
@@ -305,15 +278,6 @@
       "state" : {
         "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
         "version" : "603.0.2"
-      }
-    },
-    {
-      "identity" : "swift-tagged",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/swift-tagged",
-      "state" : {
-        "revision" : "3907a9438f5b57d317001dc99f3f11b46882272b",
-        "version" : "0.10.0"
       }
     },
     {

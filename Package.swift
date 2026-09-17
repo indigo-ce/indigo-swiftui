@@ -128,14 +128,12 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.12"),
     .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
     .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2"),
-    // Held at 1.11.x. From 1.13 the IssueReporting product is forwarded to
+    // Held below 1.13. From 1.13 the IssueReporting product is forwarded to
     // swift-issue-reporting, which duplicates it in the graph and trips
-    // Tuist's false-circular-dependency error (tuist/tuist#12846). 1.12.x is
-    // untested here, so the floor and the cap sit on the same minor; widen to
-    // "1.11.0"..<"1.13.0" once a resolve can verify 1.12.
+    // Tuist's false-circular-dependency error (tuist/tuist#12846).
     .package(
       url: "https://github.com/pointfreeco/xctest-dynamic-overlay",
-      .upToNextMinor(from: "1.11.0")
+      "1.11.0"..<"1.13.0"
     )
   ],
   swiftLanguageModes: [.v6]

@@ -24,11 +24,6 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 - **Validation.** `mise exec -- tuist install`, then
   `mise exec -- tuist generate --no-open`, iOS and macOS builds, and
   `mise exec -- tuist test AllTests`.
-- **Blocked.** Swift tools `6.4` needs Xcode 27, which has not shipped. Until it
-  does, the manifest cannot be parsed locally, so none of the validation above
-  has run and the current `Package.resolved` is hand-written rather than
-  resolver output — re-resolve it before merging. CI is likewise parked on a
-  `macos-27` runner image that does not exist yet.
 
 ### 2. Declare `DependenciesMacros` in `.indigoFoundation`
 
