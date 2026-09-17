@@ -57,22 +57,43 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
       omits the `api/v1` prefix that `docs/api-clients.md` uses throughout.
 - **Desired behavior.** The refresh call is declarative, has no force-unwrap, and
   models the request shape every cloned project will copy.
-- **Scope.** Rewrite the `refresh` closure to
-  `try await httpClient.send(baseURL: host, decoder: .api) { Path("api", "v1", "auth", "refresh-access"); post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api) }.value`,
-  add `import HTTPRequestBuilder`, and drop the manual `URLRequest`
-  construction. **Preserve the error mapping exactly**: only
-  `HTTPRequestClient.Error.badResponse(_, 401, _)` maps to
+- **Scope.** Add `import HTTPRequestBuilder`, drop the manual `URLRequest`
+  construction, and replace it with the builder form. Keep the explicit result
+  annotation — `send` is overloaded on `Response<T, ServerError>` and
+  `SuccessResponse<T>`, so `T` cannot be inferred from a bare `.value`:
+
+  ```swift
+  let response: SuccessResponse<TokenResponse> = try await httpClient.send(
+    baseURL: host,
+    decoder: .api
+  ) {
+    Path("api", "v1", "auth", "refresh-access")
+    post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
+  }
+  return AuthTokens(
+    access: response.value.accessToken,
+    refresh: response.value.refreshToken
+  )
+  ```
+
+  `post` already applies the `POST` method and the JSON `Content-Type`/`Accept`
+  headers, so no manual header work remains. **Preserve the error mapping
+  exactly**: only `HTTPRequestClient.Error.badResponse(_, 401, _)` maps to
   `AuthTokens.Error.refreshRejected`; everything else rethrows untouched. Keep
   the explanatory comment. Do not change `host`, `RefreshTokenRequest`,
   `TokenResponse`, or `JSONCoders`.
-- **Acceptance.** No `URL(string:)!` remains in the file; the closure returns
-  `AuthTokens` built from the decoded `TokenResponse`; the 401-only wipe contract
-  described in `AGENTS.md` is unchanged.
+- **Acceptance.** No `URL(string:)!` and no `httpMethod`/`setValue`/`httpBody`
+  assignment remains in the file; the closure returns `AuthTokens` built from the
+  decoded `TokenResponse`; the 401-only wipe contract described in `AGENTS.md` is
+  unchanged.
 - **Validation.** `mise exec -- tuist generate --no-open` then
-  `mise exec -- tuist build`. Add a `Core` test that feeds a
-  `.badResponse(_, 401, _)` and a `.badResponse(_, 500, _)` through the mapping
-  and asserts `refreshRejected` for the first and pass-through for the second;
-  run it with `mise exec -- tuist test AllTests`.
+  `mise exec -- tuist build`. Add a `Core` test that drives the real closure:
+  `withDependencies { $0.httpRequestClient.send = { _, _ in throw HTTPRequestClient.Error.badResponse(UUID(), 401, "") } }`
+  around `JWTAuthClient.liveValue.refresh(…)` must surface
+  `AuthTokens.Error.refreshRejected`, and the same test with `500` must surface
+  the original `.badResponse`. `HTTPRequestClient` is a `@DependencyClient`, so
+  its single `send` endpoint is the only thing the test has to stub. Run with
+  `mise exec -- tuist test AllTests`.
 
 ### 4. Add `APIErrorBody` for reading 4xx response bodies
 
@@ -82,17 +103,21 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
       failure. `Core/Sources/IndigoError.swift` carries a single
       `case invalidToken` and offers no server-message path. Depends on item 3
       landing first so the new type has a live call site to document.
-- **Desired behavior.** A cloned project can recover the server's message and its
-  stable error code from a failed request, and localize the codes it recognizes
-  while falling back to the server's prose for the rest.
+- **Desired behavior.** A cloned project can recover the server's message and,
+  when the endpoint supplies one, a stable error code it can branch on — falling
+  back to the server's prose for everything else.
 - **Scope.** Add `Core/Sources/Clients/APIErrorBody.swift` with a
   `public struct APIErrorBody: Decodable, Sendable` holding `error: String` and
   `code: String?`, plus a `public static func from(_ error: any Error) -> APIErrorBody?`
   that pattern-matches `HTTPRequestClient.Error.badResponse`, converts the body
-  string to `Data`, and decodes. Document the two fields: `error` is
-  display-ready and follows `Accept-Language`; `code` is stable and does not.
-  Do not change `IndigoError` and do not wire this into `JWTAuthClient+Live` —
-  the refresh path's contract is status-code-based by design.
+  string to `Data`, and decodes. Document the two fields as the template means
+  them: `error` is a human-readable server message suitable for display or
+  logging, and `code` is an optional stable machine-readable identifier that only
+  some endpoints send — which is why branching code must handle `nil`. Do not
+  promise that either field is localized; a cloned project's backend decides
+  that, and the doc comment should say so rather than guess. Do not change
+  `IndigoError` and do not wire this into `JWTAuthClient+Live` — the refresh
+  path's contract is status-code-based by design.
 - **Acceptance.** The type is public, `Sendable`, and returns `nil` for errors
   that are not `.badResponse` and for bodies that fail to decode.
 - **Validation.** A `Core` test covering three cases: a well-formed
@@ -133,11 +158,13 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 - [ ] **Gap.** The repo pins Tuist in `mise.toml` (4.202.2) but instructs bare
       `tuist` almost everywhere: `AGENTS.md` (lines 15–17, 21–22, 39),
-      `.github/workflows/tests.yml` (lines 25, 28, 31), `README.md`,
+      `.github/workflows/tests.yml` (lines 27, 30, 33), `README.md` (26–27,
+      104–107, 115), `docs/migration-guide.md` (540, 543, 663–670),
       `.agents/skills/xcode-snapshot/SKILL.md`,
       `.agents/skills/tuist-inspect/SKILL.md`,
-      `.agents/skills/using-tuist-generated-projects/SKILL.md`, and
-      `.agents/skills/swift-upgrade/SKILL.md`. Only `ci_scripts/ci_post_clone.sh`
+      `.agents/skills/using-tuist-generated-projects/SKILL.md`,
+      `.agents/skills/swift-upgrade/SKILL.md`, and
+      `.agents/skills/bootstrap/SKILL.md:36`. Only `ci_scripts/ci_post_clone.sh`
       goes through `mise exec --`. A shell without a mise hook resolves whatever
       `tuist` is on `PATH`, and a version mismatch corrupts the `.build`
       checkout state and breaks macro expansion across the workspace.
@@ -149,7 +176,9 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
   above; update `docs/migration-guide.md:68` to `4.202.2`. Add one line to
   `AGENTS.md`'s "Build & test" section stating why (`mise.toml` is the pin; a
   stale `PATH` binary corrupts SPM state). Leave `ci_scripts/ci_post_clone.sh`
-  as is. Do not change the pinned version in `mise.toml`.
+  as is. Do not change the pinned version in `mise.toml`. Line numbers are a
+  starting point, not the contract — re-grep for `tuist ` before finishing, since
+  earlier edits in the same file shift them.
 - **Acceptance.** Every runnable `tuist` command in `AGENTS.md`, `README.md`,
   `docs/`, `.agents/`, and `.github/` is prefixed with `mise exec --`. Prose
   mentions (scheme names, command descriptions like "`tuist test AllTests`" in
@@ -194,21 +223,26 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
       running app does not provide, so the cost of both is paid for nothing.
 - **Desired behavior.** In DEBUG, requests made by the app are captured and a
   shake opens the console; release builds are untouched.
-- **Scope.** Two changes. (a) In `Core/Sources/Clients/JWTAuthClient+Live.swift`,
-  add a module-level `URLSessionProtocol` — `URLSessionProxy(configuration: .default)`
-  under `#if DEBUG`, plain `URLSession(configuration: .default)` otherwise — and
-  pass it as the `urlSession:` argument of the refresh call. (b) In
+- **Scope.** Three changes. (a) Add `.external(name: "Pulse")` to
+  `.indigoFoundation` in `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`
+  — `URLSessionProxy` and `URLSessionProtocol` are `Pulse` types, not `PulseUI`
+  ones, and `"Pulse"` is already in `Package.swift`'s `frameworkProductTypes`, so
+  no package change is needed. (b) In
+  `Core/Sources/Clients/JWTAuthClient+Live.swift`, `import Pulse` and add a
+  module-level `URLSessionProtocol` — `URLSessionProxy(configuration: .default)`
+  under `#if DEBUG`, plain `URLSession(configuration: .default)` otherwise — then
+  pass it as the `urlSession:` argument of the refresh call. (c) In
   `App/Sources/IndigoApp.swift`, add a `#if DEBUG` `@State` flag on the root
   view, present `PulseUI`'s `ConsoleView` in a `.fullScreenCover`, and toggle it
   from `.onShake { … }`. Guard the console presentation with `#if os(iOS)` —
-  `onShake` is iOS-only. Requires item 3 (the refresh call must already go
-  through `httpClient.send`, which takes the `urlSession:` argument). Add
-  `.external(name: "Pulse")` to `.indigoFoundation` if `URLSessionProxy` is not
-  visible via `PulseUI`; `"Pulse"` is already in `frameworkProductTypes`.
+  `onShake` is iOS-only. Requires item 3: the refresh call must already go
+  through `httpClient.send(baseURL:decoder:urlSession:middleware:)`, which is
+  where the `urlSession:` argument exists.
 - **Acceptance.** A Release build contains no `PulseUI` view code and no
   `URLSessionProxy`; a DEBUG iOS build presents the console on shake; macOS
   builds are unaffected.
 - **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build` for both the `Indigo` (Debug) and
-  `Indigo Release` schemes to prove the `#if` guards compile in both
-  configurations. `mise exec -- tuist test AllTests` must stay green.
+  `mise exec -- tuist build Indigo --configuration Debug` and
+  `mise exec -- tuist build "Indigo Release" --configuration Release` to prove
+  the `#if` guards compile both ways — passing the scheme name alone does not
+  select the configuration. `mise exec -- tuist test AllTests` must stay green.
