@@ -27,7 +27,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 2. Declare `DependenciesMacros` in `.indigoFoundation`
 
-- [ ] **Gap.** `Core/Sources/Clients/NotesClient.swift` imports
+- [x] **Gap.** `Core/Sources/Clients/NotesClient.swift` imports
       `DependenciesMacros`, but `.indigoFoundation` in
       `Tuist/ProjectDescriptionHelpers/Project+Templates.swift` never lists it.
       The import only resolves because `ComposableArchitecture` happens to link
