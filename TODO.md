@@ -86,7 +86,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 4. Build the token-refresh request with `HTTPRequestBuilder`
 
-- [ ] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift` is the template's
+- [x] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift` is the template's
       only networking example, and it hand-assembles a `URLRequest`:
       `URL(string: "\(host)/auth/refresh")!` force-unwrapped, `httpMethod`,
       `Content-Type`, and `httpBody` set by hand. `HTTPRequestBuilder` ships in
