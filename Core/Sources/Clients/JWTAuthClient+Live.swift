@@ -61,7 +61,8 @@ extension JWTAuthClient: @retroactive DependencyKey {
 // MARK: - Refresh endpoint models
 
 // Template request/response shapes for the token-refresh call. Rename fields to
-// match your API; `JSONCoders.api` handles snake_case ⇄ camelCase by default.
+// match your API; keys are sent as declared, and the date strategies in
+// `JSONCoders.api` are the thing to adjust per backend.
 private struct RefreshTokenRequest: Encodable {
   let refreshToken: String
 }
