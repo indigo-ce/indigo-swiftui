@@ -8,6 +8,7 @@ extension Array where Element == TargetDependency {
       .external(name: "ComposableArchitecture"),
       .external(name: "ComposableToasts"),
       .external(name: "Dependencies"),
+      .external(name: "DependenciesMacros"),
       .external(name: "GRDB"),
       .external(name: "HTTPRequestBuilder"),
       .external(name: "HTTPRequestClient"),
