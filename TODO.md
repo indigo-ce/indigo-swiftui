@@ -46,7 +46,45 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 - **Validation.** `mise exec -- tuist generate --no-open` then
   `mise exec -- tuist build`.
 
-### 3. Build the token-refresh request with `HTTPRequestBuilder`
+### 3. Align `JSONCoders.api` with the JSON the template actually exchanges
+
+- [ ] **Gap.** `Core/Sources/Clients/JSONCoders.swift` configures `.api` with
+      `convertToSnakeCase`/`convertFromSnakeCase` and a plain `.iso8601` date
+      strategy. Both fight the only wire models the template ships.
+      `JWTAuthClient+Live.swift` declares `RefreshTokenRequest.refreshToken` and
+      `TokenResponse.accessToken`/`.refreshToken`, so the encoder silently
+      rewrites the refresh body to `{"refresh_token": …}` — a key the request
+      model never mentions — and the decoder expects `access_token` back. No
+      test catches it because nothing exercises the live path. Separately,
+      `.iso8601` accepts only `.withInternetDateTime`, so a timestamp carrying
+      fractional seconds (`…T12:00:00.123Z`, which JSON backends routinely emit)
+      throws `DecodingError.dataCorrupted`.
+- **Desired behavior.** `.api` round-trips the template's own models with their
+  declared key names and tolerates both ISO-8601 spellings on the way in.
+- **Scope.** Drop `keyEncodingStrategy` and `keyDecodingStrategy` so keys pass
+  through verbatim. Replace `decoder.dateDecodingStrategy = .iso8601` with a
+  `.custom` strategy that tries `ISO8601DateFormatter` with
+  `[.withInternetDateTime, .withFractionalSeconds]`, falls back to
+  `[.withInternetDateTime]`, and throws `DecodingError.dataCorrupted` naming the
+  offending string when neither parses. Keep
+  `encoder.dateEncodingStrategy = .iso8601`. Update the file's header comment,
+  which currently promises "snake_case on the wire", and the matching claim at
+  `Core/Sources/Clients/JWTAuthClient+Live.swift:64` that `.api` "handles
+  snake_case ⇄ camelCase by default". Both should say that keys are sent as
+  declared and point at the strategies as the thing to adjust per backend.
+  `JWTAuthClient+Live.swift` is the only consumer of `.api` today, so nothing
+  else needs touching.
+- **Acceptance.** `JSONCoders.swift` declares no key strategy; neither comment
+  claims key conversion; a `Date` encoded by `.api` and decoded by `.api`
+  survives the round trip.
+- **Validation.** Add `Core` tests: encoding a camelCase `Encodable` emits
+  `refreshToken`, not `refresh_token`; decoding
+  `{"accessToken":…,"refreshToken":…}` into a camelCase `Decodable` succeeds;
+  decoding an ISO-8601 timestamp succeeds both with and without fractional
+  seconds; decoding a malformed date string throws. `mise exec -- tuist generate
+  --no-open`, then `mise exec -- tuist test AllTests`.
+
+### 4. Build the token-refresh request with `HTTPRequestBuilder`
 
 - [ ] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift` is the template's
       only networking example, and it hand-assembles a `URLRequest`:
@@ -95,13 +133,13 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
   its single `send` endpoint is the only thing the test has to stub. Run with
   `mise exec -- tuist test AllTests`.
 
-### 4. Add `APIErrorBody` for reading 4xx response bodies
+### 5. Add `APIErrorBody` for reading 4xx response bodies
 
 - [ ] **Gap.** `HTTPRequestClient` reports non-2xx responses as
       `.badResponse(_, status, body)` with the body as a raw `String`. The
       template has no way to read it, so every 4xx collapses into an opaque
       failure. `Core/Sources/IndigoError.swift` carries a single
-      `case invalidToken` and offers no server-message path. Depends on item 3
+      `case invalidToken` and offers no server-message path. Depends on item 4
       landing first so the new type has a live call site to document.
 - **Desired behavior.** A cloned project can recover the server's message and,
   when the endpoint supplies one, a stable error code it can branch on — falling
@@ -124,7 +162,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
   `{"error":…,"code":…}` body, a body without `code`, and a non-`.badResponse`
   error. `mise exec -- tuist test AllTests`.
 
-### 5. Rewrite `docs/api-clients.md` against the shipped code
+### 6. Rewrite `docs/api-clients.md` against the shipped code
 
 - [ ] **Gap.** The guide contradicts the template it documents. It tells readers
       to add `kaishin/http-request-client` and `kaishin/jwt-auth-client` at
@@ -133,28 +171,33 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
       `JWTAuthClient+Live` example returns the refresh result with **no error
       mapping at all**, which silently reverts the 401-only credential-wipe
       contract that the shipped code implements and `AGENTS.md` calls out — a
-      reader who follows the doc gets logged out by any timeout or 5xx. It also
-      references `JSONDecoder.shared` / `JSONEncoder.shared`, while the template
-      ships `.api` in `Core/Sources/Clients/JSONCoders.swift`. Do this after
-      items 3 and 4 so the doc can describe code that exists.
+      reader who follows the doc gets logged out by any timeout or 5xx. Its
+      "JSON Encoding/Decoding" section also defines its own
+      `JSONDecoder.shared` / `JSONEncoder.shared` and threads `decoder: .shared`
+      / `encoder: .shared` through eight call sites, while the template ships
+      `.api` in `Core/Sources/Clients/JSONCoders.swift`. Do this after items 3,
+      4, and 5 so the doc can describe coders and types that exist.
 - **Desired behavior.** Every snippet in the guide compiles against this
   repository's dependencies and reflects the contracts it actually enforces.
 - **Scope.** Correct the package URLs and version floors; replace the
   `JWTAuthClient+Live` snippet with the shipped implementation including the
-  `refreshRejected` mapping and its rationale; rename `.shared` coders to `.api`
-  and point at `JSONCoders.swift` rather than restating the strategies; add a
-  short section on surfacing server errors via `APIErrorBody`. Keep the existing
-  structure (single vs. domain clients, path styles, request building, testing)
-  and the `Path("api", "v1", …)` convention. Documentation only — no source
-  changes.
-- **Acceptance.** No occurrence of `kaishin/http-request-client`,
-  `kaishin/jwt-auth-client`, `JSONDecoder.shared`, or `JSONEncoder.shared`
-  remains; the refresh example maps 401 and only 401.
+  `refreshRejected` mapping and its rationale; replace the hand-rolled `.shared`
+  coder definitions with a pointer to `JSONCoders.swift` instead of restating
+  the strategies, and rename every `decoder: .shared` / `encoder: .shared` call
+  site to `.api`; add a short section on surfacing server errors via
+  `APIErrorBody`. Keep the existing structure (single vs. domain clients, path
+  styles, request building, testing) and the `Path("api", "v1", …)` convention.
+  Documentation only — no source changes.
+- **Acceptance.** `rg 'kaishin/|\.shared' docs/api-clients.md` returns nothing:
+  no `kaishin/…` package URL, no `static let shared` coder definition, and no
+  `decoder:`/`encoder: .shared` argument survives. The refresh example maps 401
+  and only 401.
 - **Validation.** Cross-read each snippet against `Package.swift`,
+  `Core/Sources/Clients/APIErrorBody.swift`,
   `Core/Sources/Clients/JSONCoders.swift`, and
   `Core/Sources/Clients/JWTAuthClient+Live.swift`. No build required.
 
-### 6. Standardize on `mise exec -- tuist` and fix the stale version in the guide
+### 7. Standardize on `mise exec -- tuist` and fix the stale version in the guide
 
 - [ ] **Gap.** The repo pins Tuist in `mise.toml` (4.202.2) but instructs bare
       `tuist` almost everywhere: `AGENTS.md` (lines 15–17, 21–22, 39),
@@ -186,7 +229,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 - **Validation.** Confirm the workflow file still parses as valid YAML and that
   `mise exec -- tuist generate --no-open` succeeds locally.
 
-### 7. Make the `Sharing` → `SwiftSharing` module alias usable by first-party targets
+### 8. Make the `Sharing` → `SwiftSharing` module alias usable by first-party targets
 
 - [ ] **Gap.** `Package.swift` renames the `Sharing` product to `SwiftSharing`
       and applies `-module-alias Sharing=SwiftSharing` to the external targets
@@ -214,7 +257,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
   `mise exec -- tuist build`. Temporarily adding `import Sharing` to a `Core`
   source must compile; revert before committing.
 
-### 8. Wire the DEBUG network console to the existing shake modifier
+### 9. Wire the DEBUG network console to the existing shake modifier
 
 - [ ] **Gap.** The template links `PulseUI` through `.indigoFoundation` and ships
       `Components/Sources/View+OnShake.swift`, and neither is used anywhere —
@@ -235,7 +278,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
   `App/Sources/IndigoApp.swift`, add a `#if DEBUG` `@State` flag on the root
   view, present `PulseUI`'s `ConsoleView` in a `.fullScreenCover`, and toggle it
   from `.onShake { … }`. Guard the console presentation with `#if os(iOS)` —
-  `onShake` is iOS-only. Requires item 3: the refresh call must already go
+  `onShake` is iOS-only. Requires item 4: the refresh call must already go
   through `httpClient.send(baseURL:decoder:urlSession:middleware:)`, which is
   where the `urlSession:` argument exists.
 - **Acceptance.** A Release build contains no `PulseUI` view code and no
