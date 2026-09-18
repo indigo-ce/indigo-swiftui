@@ -48,7 +48,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 3. Align `JSONCoders.api` with the JSON the template actually exchanges
 
-- [ ] **Gap.** `Core/Sources/Clients/JSONCoders.swift` configures `.api` with
+- [x] **Gap.** `Core/Sources/Clients/JSONCoders.swift` configures `.api` with
       `convertToSnakeCase`/`convertFromSnakeCase` and a plain `.iso8601` date
       strategy. Both fight the only wire models the template ships.
       `JWTAuthClient+Live.swift` declares `RefreshTokenRequest.refreshToken` and
