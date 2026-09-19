@@ -1,5 +1,6 @@
 import Dependencies
 import Foundation
+import HTTPRequestBuilder
 import HTTPRequestClient
 import JWTAuth
 
@@ -22,27 +23,23 @@ extension JWTAuthClient: @retroactive DependencyKey {
     refresh: { tokens in
       @Dependency(\.httpRequestClient) var httpClient
 
-      var request = URLRequest(url: URL(string: "\(host)/auth/refresh")!)
-      request.httpMethod = "POST"
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-      request.httpBody = try JSONEncoder.api.encode(
-        RefreshTokenRequest(refreshToken: tokens.refresh)
-      )
-
       do {
         let response: SuccessResponse<TokenResponse> = try await httpClient.send(
-          request,
+          baseURL: host,
           decoder: .api
-        )
+        ) {
+          Path("api", "v1", "auth", "refresh-access")
+          post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
+        }
         return AuthTokens(
           access: response.value.accessToken,
           refresh: response.value.refreshToken
         )
       } catch let error as HTTPRequestClient.Error {
         // THE CONTRACT: only a definitive server rejection destroys the
-        // session. A 401 from /auth/refresh means the refresh token is no
-        // longer valid — map it to `refreshRejected` so the library wipes the
-        // stored credentials and forces re-authentication.
+        // session. A 401 from /api/v1/auth/refresh-access means the refresh
+        // token is no longer valid — map it to `refreshRejected` so the
+        // library wipes the stored credentials and forces re-authentication.
         //
         // Every other failure (timeout, DNS, offline, 5xx, decoding error —
         // `.invalidHTTPResponse`, `.decodingError`, `.other`) is transient:
@@ -63,7 +60,7 @@ extension JWTAuthClient: @retroactive DependencyKey {
 // Template request/response shapes for the token-refresh call. Rename fields to
 // match your API; keys are sent as declared, and the date strategies in
 // `JSONCoders.api` are the thing to adjust per backend.
-private struct RefreshTokenRequest: Encodable {
+private struct RefreshTokenRequest: Encodable, Sendable {
   let refreshToken: String
 }
 
