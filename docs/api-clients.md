@@ -388,7 +388,7 @@ Non-2xx responses arrive as `HTTPRequestClient.Error.badResponse` carrying the r
 
 ```swift
 do {
-  try await apiClient.sendAuthenticated {
+  let items: [Item] = try await apiClient.sendAuthenticated {
     Path("api", "v1", "items")
   }.value
 } catch {
