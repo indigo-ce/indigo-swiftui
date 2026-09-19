@@ -40,6 +40,8 @@ External packages flow through the `.indigoFoundation` helper (prevents double-l
 3. Add `.external(name:)` to `.indigoFoundation` in `Project+Templates.swift`.
 4. Run `mise exec -- tuist install && mise exec -- tuist generate`.
 
+Any target that imports `Sharing` must be declared with `usesSharing: true`, because the product ships aliased as `SwiftSharing`.
+
 ## Conventions
 
 - **Features:** `XFeature` for the `@Reducer`, `XView` for the SwiftUI view.
