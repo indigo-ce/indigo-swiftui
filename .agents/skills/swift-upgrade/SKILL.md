@@ -18,7 +18,7 @@ b. Manually set the Swift dependencies in `Package.swift` to their latest versio
 c. After updating the dependencies, run the following command to update the package:
 
 ```bash
-tuist install
+mise exec -- tuist install
 ```
 
 d. Display a list of updated dependencies, with ⚠️ in front of the dependencies that were updated to a breaking change.

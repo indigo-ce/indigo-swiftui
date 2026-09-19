@@ -10,7 +10,7 @@ Identify any issues in the dependency graph of this project.
 ## 1. Regenerate from scratch
 
 ```sh
-tuist generate --no-open --cache-profile none
+mise exec -- tuist generate --no-open --cache-profile none
 ```
 
 The command should _not_ return double-linked static library warnings:
@@ -22,7 +22,7 @@ If you find a static target that is linked from multiple targets, make it dynami
 ## 2. Check for implicit dependencies
 
 ```sh
-tuist inspect implicit-imports
+mise exec -- tuist inspect implicit-imports
 ```
 
 Expected output:
@@ -34,7 +34,7 @@ Expected output:
 ## 3. Check for redundant dependencies
 
 ```sh
-tuist inspect redundant-imports
+mise exec -- tuist inspect redundant-imports
 ```
 
 Expected output:

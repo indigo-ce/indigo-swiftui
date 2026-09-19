@@ -12,14 +12,16 @@ Uses **Tuist** (pinned via `mise`). This is a generated project — never hand-e
 
 ```bash
 mise install                 # toolchain (Tuist)
-tuist install                # SPM dependencies
-tuist generate --no-open
-tuist test --platform ios    # or: --platform macos
+mise exec -- tuist install  # SPM dependencies
+mise exec -- tuist generate --no-open
+mise exec -- tuist test --platform ios    # or: --platform macos
 ```
 
+- Always run Tuist via `mise exec --`: `mise.toml` pins the version, and a stale `PATH` binary corrupts SPM state.
+
 - Regenerate after any change to `Package.swift`, `Workspace.swift`, or a `Project.swift`.
-- `AllTests` is the workspace scheme that runs every module's test bundle (`tuist test AllTests`, or ⌘U in Xcode).
-- Check import hygiene with `tuist inspect implicit-imports` / `tuist inspect redundant-imports`.
+- `AllTests` is the workspace scheme that runs every module's test bundle (`mise exec -- tuist test AllTests`, or ⌘U in Xcode).
+- Check import hygiene with `mise exec -- tuist inspect implicit-imports` / `mise exec -- tuist inspect redundant-imports`.
 
 ## Layout
 
@@ -36,7 +38,7 @@ External packages flow through the `.indigoFoundation` helper (prevents double-l
 1. Add the package to `Package.swift`.
 2. Add its product to `frameworkProductTypes` in `Package.swift`.
 3. Add `.external(name:)` to `.indigoFoundation` in `Project+Templates.swift`.
-4. Run `tuist install && tuist generate`.
+4. Run `mise exec -- tuist install && mise exec -- tuist generate`.
 
 ## Conventions
 

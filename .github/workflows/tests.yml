@@ -24,10 +24,10 @@ jobs:
         run: mise install
 
       - name: Install dependencies
-        run: tuist install
+        run: mise exec -- tuist install
 
       - name: Generate project
-        run: tuist generate --no-open
+        run: mise exec -- tuist generate --no-open
 
       - name: Run tests
-        run: tuist test --platform ios
+        run: mise exec -- tuist test --platform ios
