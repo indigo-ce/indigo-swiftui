@@ -135,7 +135,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 5. Add `APIErrorBody` for reading 4xx response bodies
 
-- [ ] **Gap.** `HTTPRequestClient` reports non-2xx responses as
+- [x] **Gap.** `HTTPRequestClient` reports non-2xx responses as
       `.badResponse(_, status, body)` with the body as a raw `String`. The
       template has no way to read it, so every 4xx collapses into an opaque
       failure. `Core/Sources/IndigoError.swift` carries a single
