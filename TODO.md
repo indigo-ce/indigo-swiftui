@@ -199,7 +199,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 7. Standardize on `mise exec -- tuist` and fix the stale version in the guide
 
-- [ ] **Gap.** The repo pins Tuist in `mise.toml` (4.202.2) but instructs bare
+- [x] **Gap.** The repo pins Tuist in `mise.toml` (4.202.2) but instructs bare
       `tuist` almost everywhere: `AGENTS.md` (lines 15–17, 21–22, 39),
       `.github/workflows/tests.yml` (lines 27, 30, 33), `README.md` (26–27,
       104–107, 115), `docs/migration-guide.md` (540, 543, 663–670),

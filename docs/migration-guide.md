@@ -65,7 +65,7 @@ curl https://mise.jdx.dev/install.sh | sh
 
 # Create mise.toml file
 echo '[tools]
-tuist = "4.200.5"' > mise.toml
+tuist = "4.202.2"' > mise.toml
 
 # Install Tuist
 mise install
@@ -537,10 +537,10 @@ For simplicity, initially place ALL existing code in the `App/Sources/` director
 
 ```bash
 # Install dependencies
-tuist install
+mise exec -- tuist install
 
 # Generate Xcode project
-tuist generate
+mise exec -- tuist generate
 
 # Open the generated workspace
 open YourApp.xcworkspace
@@ -660,14 +660,14 @@ curl https://mise.jdx.dev/install.sh | sh
 mise install
 
 # Development workflow
-tuist install          # Install dependencies
-tuist generate         # Generate Xcode project
-tuist clean           # Clean generated files
-tuist edit            # Edit Tuist configuration
+mise exec -- tuist install          # Install dependencies
+mise exec -- tuist generate         # Generate Xcode project
+mise exec -- tuist clean           # Clean generated files
+mise exec -- tuist edit            # Edit Tuist configuration
 
 # Troubleshooting
-tuist graph           # Visualize project structure
-tuist build           # Build without Xcode
+mise exec -- tuist graph           # Visualize project structure
+mise exec -- tuist build           # Build without Xcode
 ```
 
 This migration guide provides a systematic approach for AI agents to successfully migrate SwiftUI projects to the Indigo Stack architecture while maintaining functionality and enabling future modular development.

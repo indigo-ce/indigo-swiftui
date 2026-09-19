@@ -10,10 +10,10 @@ Create snapshots of all generated `.xcodeproj` files so manual Xcode changes can
 ## 1. Clean and regenerate
 
 ```bash
-tuist clean
+mise exec -- tuist clean
 find . -name "*.xcodeproj" -type d -exec rm -rf {} +
-tuist install
-tuist generate
+mise exec -- tuist install
+mise exec -- tuist generate
 ```
 
 ## 2. Snapshot the freshly generated projects

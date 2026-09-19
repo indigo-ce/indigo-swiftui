@@ -9,7 +9,7 @@ description: Guides day-to-day work in Tuist-generated Xcode workspaces, includi
 
 ```bash
 # Generate workspace without opening Xcode
-tuist generate --no-open
+mise exec -- tuist generate --no-open
 
 # Build a scheme with xcodebuild
 xcodebuild build -workspace App.xcworkspace -scheme App
@@ -60,8 +60,8 @@ let target = Target(
 When working on a focused area, generate only what you need:
 
 ```bash
-tuist generate tag:feature:payments
-tuist generate PaymentsUI PaymentsTests
+mise exec -- tuist generate tag:feature:payments
+mise exec -- tuist generate PaymentsUI PaymentsTests
 ```
 
 ### Align build configurations
@@ -72,9 +72,9 @@ Keep build configurations aligned between the project and external dependencies.
 
 ### Generate intentionally
 
-- Use `tuist generate --no-open` in automation and scripts to avoid launching Xcode.
+- Use `mise exec -- tuist generate --no-open` in automation and scripts to avoid launching Xcode.
 - Regenerate when any manifest changes (or the dependency graph changes).
-- If generation fails due to missing products, run `tuist install` to resolve dependencies and retry.
+- If generation fails due to missing products, run `mise exec -- tuist install` to resolve dependencies and retry.
 
 ### Build with xcodebuild
 
@@ -89,7 +89,7 @@ xcodebuild build \
 
 ### Test with xcodebuild
 
-Use `xcodebuild test` for running tests locally. Prefer it over `tuist test` because `tuist test` regenerates the project on each invocation, which slows down iteration.
+Use `xcodebuild test` for running tests locally. Prefer it over `mise exec -- tuist test` because `mise exec -- tuist test` regenerates the project on each invocation, which slows down iteration.
 
 To optimize test run time:
 
@@ -114,7 +114,7 @@ xcodebuild test \
 
 - Keep `buildableFolders` paths aligned to the target's real file system layout.
 - Avoid overlapping `buildableFolders` with `sources` or `resources` globs in the same target.
-- Open Xcode manually when needed after running `tuist generate --no-open`.
+- Open Xcode manually when needed after running `mise exec -- tuist generate --no-open`.
 
 ## Troubleshooting
 

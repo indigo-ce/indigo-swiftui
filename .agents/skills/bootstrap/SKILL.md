@@ -33,7 +33,7 @@ Update the following files to use the new project name (search for additional fi
 - Update the bundle identifier pattern in project configuration to match the new name
 - Remove all mentions of "template" from the project
 - Ensure CLAUDE.md contains project-specific architecture details, not generic template information
-- Run `tuist generate` after renaming to regenerate Xcode workspace
+- Run `mise exec -- tuist generate` after renaming to regenerate Xcode workspace
 
 ## Project Name Formatting
 

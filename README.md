@@ -23,8 +23,8 @@ A modular SwiftUI template using [Tuist](https://tuist.dev/) and [The Composable
 3. **Install dependencies and generate project**:
 
    ```sh
-   tuist install
-   tuist generate
+   mise exec -- tuist install
+   mise exec -- tuist generate
    ```
 
 4. **Open and build**:
@@ -101,10 +101,10 @@ dependencies: [
 4. Install and validate:
 
    ```sh
-   tuist install
-   tuist generate
-   tuist inspect implicit-imports
-   tuist inspect redundant-imports
+   mise exec -- tuist install
+   mise exec -- tuist generate
+   mise exec -- tuist inspect implicit-imports
+   mise exec -- tuist inspect redundant-imports
    ```
 
 ### Making Project Changes
@@ -112,7 +112,7 @@ dependencies: [
 After modifying Tuist project files (e.g., adding targets):
 
 ```sh
-tuist generate
+mise exec -- tuist generate
 ```
 
 To update Tuist itself:
