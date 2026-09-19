@@ -27,6 +27,11 @@ extension Array where Element == TargetDependency {
 }
 
 extension Project {
+  /// Creates a framework project with the shared Indigo base settings.
+  ///
+  /// - Parameter usesSharing: Pass `true` from any target that imports `Sharing`.
+  ///   The product ships aliased as `SwiftSharing`, so the flag applies
+  ///   `-module-alias Sharing=SwiftSharing` to the target.
   public static func framework(
     name: String,
     reverseDomain: String = teamReverseDomain,

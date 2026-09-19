@@ -231,7 +231,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 8. Make the `Sharing` → `SwiftSharing` module alias usable by first-party targets
 
-- [ ] **Gap.** `Package.swift` renames the `Sharing` product to `SwiftSharing`
+- [x] **Gap.** `Package.swift` renames the `Sharing` product to `SwiftSharing`
       and applies `-module-alias Sharing=SwiftSharing` to the external targets
       that need it. `Project.framework(…)` exposes a `usesSharing: Bool = false`
       parameter that applies the same flag, but **no project passes `true`** —
