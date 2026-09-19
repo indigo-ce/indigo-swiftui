@@ -22,8 +22,8 @@ Key advantages:
 Add these packages to your project:
 
 ```swift
-.package(url: "https://github.com/kaishin/http-request-client", from: "0.1.0"),
-.package(url: "https://github.com/kaishin/jwt-auth-client", from: "0.1.0"),
+.package(url: "https://github.com/indigo-ce/http-request-client", from: "1.6.0"),
+.package(url: "https://github.com/indigo-ce/jwt-auth-client", from: "2.0.0"),
 ```
 
 Import them in your client files:
@@ -155,7 +155,7 @@ public static let liveValue = { () -> Self in
   } createStack: { stack in
     try await apiClient.sendAuthenticated {
       Path("api", "v1", "stacks")
-      post(stack, encoder: .shared)
+      post(stack, encoder: .api)
     }.value
   } getTiles: { stackID in
     try await apiClient.sendAuthenticated {
@@ -231,29 +231,53 @@ return Self { page in
 
 ### Setting Up JWT Authentication
 
-Create a `JWTAuthClient+Live.swift` file:
+The template ships this wiring in `Core/Sources/Clients/JWTAuthClient+Live.swift` — copy it and adjust `host`, the refresh endpoint path, and the request/response models to match your backend:
 
 ```swift
 import Dependencies
+import Foundation
 import HTTPRequestBuilder
 import HTTPRequestClient
 import JWTAuth
 
 extension JWTAuthClient: @retroactive DependencyKey {
-  public static let liveValue = Self {
-    // Return your API base URL
-    Configuration.apiHost
-  } refresh: { tokens in
-    @Dependency(\.httpClient) var httpClient
+  public static let host = "https://api.example.com"
 
-    // Call your token refresh endpoint
-    return try await httpClient.send {
-      Path("api", "v1", "auth", "refresh-access")
-      post(RefreshToken(tokens.refresh))
-    }.value
-  }
+  public static let liveValue = Self(
+    baseURL: { host },
+    refresh: { tokens in
+      @Dependency(\.httpRequestClient) var httpClient
+
+      do {
+        let response: SuccessResponse<TokenResponse> = try await httpClient.send(
+          baseURL: host,
+          decoder: .api
+        ) {
+          Path("api", "v1", "auth", "refresh-access")
+          post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
+        }
+        return AuthTokens(
+          access: response.value.accessToken,
+          refresh: response.value.refreshToken
+        )
+      } catch let error as HTTPRequestClient.Error {
+        // Only a 401 means the refresh token was rejected: surface
+        // `refreshRejected` so stored credentials are wiped and the user
+        // re-authenticates. Every other failure (timeout, offline, 5xx,
+        // decoding error) is transient, so rethrow it untouched and keep the
+        // tokens for a later retry — mapping those to `refreshRejected` would
+        // log the user out on a momentary network blip.
+        if case .badResponse(_, 401, _) = error {
+          throw AuthTokens.Error.refreshRejected
+        }
+        throw error
+      }
+    }
+  )
 }
 ```
+
+`RefreshTokenRequest` and `TokenResponse` are declared alongside the live value; rename their fields to match your API. Keys are sent as declared — the date and key strategies in `JSONCoders.api` are the thing to adjust per backend.
 
 Create an alias for convenience:
 
@@ -276,9 +300,9 @@ try await apiClient.sendAuthenticated {
 }.value
 
 // With custom decoder
-try await apiClient.sendAuthenticated(decoder: .shared) {
+try await apiClient.sendAuthenticated(decoder: .api) {
   Path("api", "v1", "stacks")
-  post(stack, encoder: .shared)
+  post(stack, encoder: .api)
 }.value
 ```
 
@@ -320,7 +344,7 @@ post(item)
 
 // POST with custom encoder
 Path("api", "v1", "items")
-post(item, encoder: .shared)
+post(item, encoder: .api)
 
 // PUT
 Path("api", "v1", "items", itemId)
@@ -347,50 +371,37 @@ header("X-Custom-Header", "value")
 
 ## JSON Encoding/Decoding
 
-For APIs with custom date formats, create shared coders:
-
-```swift
-extension JSONDecoder {
-  public static let shared: JSONDecoder = {
-    let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .custom { decoder in
-      let container = try decoder.singleValueContainer()
-      let dateString = try container.decode(String.self)
-
-      let formatter = ISO8601DateFormatter()
-      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-      guard let date = formatter.date(from: dateString) else {
-        throw DecodingError.dataCorrupted(
-          DecodingError.Context(
-            codingPath: decoder.codingPath,
-            debugDescription: "Invalid date format: \(dateString)"
-          )
-        )
-      }
-      return date
-    }
-    return decoder
-  }()
-}
-
-extension JSONEncoder {
-  public static let shared: JSONEncoder = {
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    return encoder
-  }()
-}
-```
+The template ships ready-made coders in `Core/Sources/Clients/JSONCoders.swift`: `JSONEncoder.api` and `JSONDecoder.api`. Keys pass through verbatim (sent as declared in Swift) and dates use ISO-8601 — the decoder additionally tolerates fractional seconds on the way in. Use `.api` everywhere you talk to the backend instead of scattering ad-hoc `JSONEncoder()` / `JSONDecoder()` instances, and adjust the strategies in `JSONCoders.swift` to match your API.
 
 Use them in requests:
 
 ```swift
-try await apiClient.sendAuthenticated(decoder: .shared) {
+try await apiClient.sendAuthenticated(decoder: .api) {
   Path("api", "v1", "items")
-  post(item, encoder: .shared)
+  post(item, encoder: .api)
 }.value
 ```
+
+### Surfacing server errors
+
+Non-2xx responses arrive as `HTTPRequestClient.Error.badResponse` carrying the raw body string. Decode it with `APIErrorBody` from `Core/Sources/Clients/APIErrorBody.swift`:
+
+```swift
+do {
+  let items: [Item] = try await apiClient.sendAuthenticated {
+    Path("api", "v1", "items")
+  }.value
+} catch {
+  if let body = APIErrorBody.from(error) {
+    // `error` is a human-readable server message for display or logging;
+    // `code` is a stable machine-readable identifier that only some
+    // endpoints send, so fall back to the message when it is nil.
+  }
+  throw error
+}
+```
+
+`APIErrorBody.from` returns `nil` for errors that are not `badResponse` and for bodies that fail to decode. Neither field is promised to be localized — that depends on the backend.
 
 ## Configuration
 
@@ -520,13 +531,13 @@ extension APIEndpointClient: DependencyKey {
         basicAuth(username: payload.email, password: payload.password)
       }.value
     } getStacks: {
-      try await apiClient.sendAuthenticated(decoder: .shared) {
+      try await apiClient.sendAuthenticated(decoder: .api) {
         Path("api", "v1", "stacks")
       }.value
     } createStack: { stack in
-      try await apiClient.sendAuthenticated(decoder: .shared) {
+      try await apiClient.sendAuthenticated(decoder: .api) {
         Path("api", "v1", "stacks")
-        post(stack, encoder: .shared)
+        post(stack, encoder: .api)
       }.value
     }
   }()

@@ -164,7 +164,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 6. Rewrite `docs/api-clients.md` against the shipped code
 
-- [ ] **Gap.** The guide contradicts the template it documents. It tells readers
+- [x] **Gap.** The guide contradicts the template it documents. It tells readers
       to add `kaishin/http-request-client` and `kaishin/jwt-auth-client` at
       `from: "0.1.0"`; `Package.swift` actually uses `indigo-ce/http-request-client`
       at 1.6.0 and `indigo-ce/jwt-auth-client` at 2.0.0. Its
