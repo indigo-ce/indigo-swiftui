@@ -17,6 +17,7 @@ extension Array where Element == TargetDependency {
       .external(name: "Logging"),
       .external(name: "LoggingClient"),
       .external(name: "Perception"),
+      .external(name: "Pulse"),
       .external(name: "PulseUI"),
       .external(name: "Sharing"),
       .external(name: "SQLiteData"),

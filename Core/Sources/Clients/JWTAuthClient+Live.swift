@@ -3,6 +3,13 @@ import Foundation
 import HTTPRequestBuilder
 import HTTPRequestClient
 import JWTAuth
+import Pulse
+
+#if DEBUG
+  nonisolated(unsafe) var indigoSession: URLSessionProtocol = URLSessionProxy(configuration: .default)
+#else
+  nonisolated(unsafe) var indigoSession: URLSessionProtocol = URLSession(configuration: .default)
+#endif
 
 // MARK: - Live implementation
 
@@ -26,7 +33,8 @@ extension JWTAuthClient: @retroactive DependencyKey {
       do {
         let response: SuccessResponse<TokenResponse> = try await httpClient.send(
           baseURL: host,
-          decoder: .api
+          decoder: .api,
+          urlSession: indigoSession
         ) {
           Path("api", "v1", "auth", "refresh-access")
           post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)

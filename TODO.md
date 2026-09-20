@@ -259,7 +259,7 @@ followed by `mise exec -- tuist build`; do not rely on a simulator run.
 
 ### 9. Wire the DEBUG network console to the existing shake modifier
 
-- [ ] **Gap.** The template links `PulseUI` through `.indigoFoundation` and ships
+- [x] **Gap.** The template links `PulseUI` through `.indigoFoundation` and ships
       `Components/Sources/View+OnShake.swift`, and neither is used anywhere —
       `PulseUI` is imported by no source file and `onShake` has no call site.
       `README.md` and the dependency list advertise network debugging that the
