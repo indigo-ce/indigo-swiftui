@@ -35,6 +35,7 @@ let project = Project(
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": .string("mac.entitlements"),
           "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": .string("ios.entitlements"),
           "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": .string("ios.entitlements"),
+          "OTHER_SWIFT_FLAGS": "$(inherited) -module-alias Sharing=SwiftSharing",
           "SWIFT_VERSION": "6.0"
         ]
       )
@@ -47,7 +48,12 @@ let project = Project(
       buildableFolders: [.folder("Tests")],
       dependencies: [
         .target(name: appTarget.targetName)
-      ]
+      ],
+      settings: .settings(
+        base: [
+          "OTHER_SWIFT_FLAGS": "$(inherited) -module-alias Sharing=SwiftSharing"
+        ]
+      )
     )
   ],
   schemes: [
