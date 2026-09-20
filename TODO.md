@@ -2,290 +2,236 @@
 
 ## Architecture Sync
 
-Ordered: earlier items unblock later ones. Each is scoped to one focused pull
-request. Validate Swift changes with `mise exec -- tuist generate --no-open`
-followed by `mise exec -- tuist build`; do not rely on a simulator run.
+Ordered by priority; where an item depends on an earlier one it says so. Each is
+scoped to one focused pull request. Validate Swift changes with
+`mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
+do not rely on a simulator run.
 
-### 1. Upgrade the Swift toolchain and dependency graph
+### 1. Bootstrap the stored auth session at the app root
 
-- [x] **Gap.** The project is on Swift tools `6.2` with an older locked dependency
-      graph. The database stack has also had compatibility issues across
-      `sqlite-data` and `swift-structured-queries` releases, so selectively
-      bumping one transitive package is not a reliable maintenance strategy.
-- **Desired behavior.** The template uses Swift tools `6.4` and the latest
-  compatible direct dependencies as one deliberately re-resolved graph.
-- **Scope.** Update `Package.swift` to Swift tools `6.4`, raise direct dependency
-  floors to the versions reported by `swift outdated`, and re-resolve
-  `Package.resolved`. The database stack should resolve to `sqlite-data 1.12.0`,
-  `swift-structured-queries 0.39.2`, and GRDB `7.11.1`.
-- **Acceptance.** `Package.swift` declares GRDB and `swift-structured-queries` as
-  root dependencies; `Package.resolved` shows `sqlite-data 1.12.0`,
-  `swift-structured-queries 0.39.2`, and GRDB `7.11.1`.
-- **Validation.** `mise exec -- tuist install`, then
-  `mise exec -- tuist generate --no-open`, iOS and macOS builds, and
+- [ ] **Gap.** The template ships a complete auth stack that nothing switches on.
+      `Core/Sources/Clients/JWTAuthClient+Live.swift` implements the refresh
+      contract, `.indigoFoundation` links `JWTAuth` and `SimpleKeychain`, and
+      `AGENTS.md` sells "JWTAuth with automatic token refresh" — but
+      `App/Sources/IndigoApp.swift` builds a `NotesListFeature` store directly
+      and its only `prepareDependencies` work is the database. No code calls
+      `jwtAuthClient.refreshExpiredTokens()` or `loadSession()`, so the tokens
+      `JWTAuth` persists to the keychain are never read back into
+      `@Shared(.authSession)` at launch and the live `refresh` closure has no
+      production call site. A cloned project inherits an auth stack that is
+      linked, documented, and inert.
+- **Desired behavior.** On launch the app restores the keychain session into
+  `@Shared(.authSession)`, refreshes an expired access token before any feature
+  runs, and renders content only once that has settled. A failure to restore is
+  never fatal: no tokens at all is the normal first-run state.
+- **Scope.** Add a `RootFeature` framework project — the app's composition root
+  — and make it the root of the scene.
+  - `RootFeature/Project.swift`:
+    ```swift
+    let project = Project.framework(
+      name: "RootFeature",
+      dependencies: [
+        .project(target: "Core", path: .relativeToRoot("Core")),
+        .project(target: "NotesListFeature", path: .relativeToRoot("NotesListFeature"))
+      ] + .indigoFoundation,
+      testDependencies: .indigoFoundation,
+      usesSharing: true
+    )
+    ```
+  - `RootFeature/Sources/RootView.swift` holds the reducer *and* the view, the
+    same single-file shape `NotesListFeature/Sources/NotesListView.swift` uses.
+    `State` carries `@Shared(.authSession) public var authSession: AuthSession?`,
+    `var isSessionLoaded = false`, and `var notesList = NotesListFeature.State()`.
+    `Action` is `task`, `sessionLoaded`, `notesList(NotesListFeature.Action)`.
+    `.task` returns
+    `.run { send in try? await authClient.refreshExpiredTokens(); await send(.sessionLoaded) }`
+    — the `try?` is deliberate and must carry a comment: with no stored tokens
+    the call throws `AuthTokens.Error.missingToken`, which is the expected
+    first-launch path, and a transient network failure must not block the app.
+    `.sessionLoaded` sets `isSessionLoaded = true`. Scope `NotesListFeature`
+    with `Scope(state: \.notesList, action: \.notesList)`. `RootView` renders
+    `NotesListView` once `isSessionLoaded` is true and a `ProgressView`
+    otherwise, and fires `store.send(.task)` from `.task`.
+  - `Workspace.swift`: add `"RootFeature"` to `projects` and a
+    `.testableTarget(target: .project(path: "RootFeature", target: "RootFeatureTests"))`
+    entry to the `AllTests` scheme.
+  - `App/Project.swift`: replace the `NotesListFeature` project dependency with
+    `RootFeature` (it re-exports the feature through the graph).
+  - `App/Sources/IndigoApp.swift`: build the store from `RootFeature` and render
+    `RootView`. Keep the existing `#if DEBUG` shake-to-console wiring attached to
+    the new root view, unchanged.
+
+  Do not add sign-in/sign-out UI, an `isAuthenticated` gate, or any new model —
+  those are product decisions a clone makes. This item wires the lifecycle only.
+- **Acceptance.** `RootFeature` appears in `Workspace.swift`, `AllTests`, and
+  `App/Project.swift`; `IndigoApp` no longer constructs a `NotesListFeature`
+  store; `refreshExpiredTokens()` runs exactly once per launch from `.task`; a
+  launch with an empty keychain reaches `isSessionLoaded == true` without
+  surfacing an error.
+- **Validation.** `mise exec -- tuist generate --no-open` then
+  `mise exec -- tuist build`. Add `RootFeatureTests` with three `TestStore`
+  cases, all driving `.task` and receiving `.sessionLoaded`. Stub
+  `keychainClient.load = { _ in "stale" }`, `keychainClient.save = { _, _ in }`,
+  `keychainClient.delete = { _ in }`, and `authTokensClient = .liveValue` so the
+  real persistence path runs against the stub keychain. The non-JWT strings make
+  `AuthTokens.toSession()` report `.expired`, which is what drives the refresh —
+  no signed fixture token is needed.
+  1. `jwtAuthClient.refresh = { _ in AuthTokens(access: "fresh", refresh: "fresh") }`
+     → `authSession?.tokens?.access == "fresh"`.
+  2. `jwtAuthClient.refresh = { _ in throw AuthTokens.Error.refreshRejected }`
+     → `authSession == nil` (credentials destroyed).
+  3. `jwtAuthClient.refresh = { _ in throw URLError(.timedOut) }`
+     → `authSession?.tokens?.access == "stale"` (tokens preserved).
+
+  All three must still reach `isSessionLoaded == true`. Run with
   `mise exec -- tuist test AllTests`.
 
-### 2. Declare `DependenciesMacros` in `.indigoFoundation`
+### 2. Share one immutable network session across `Core` clients
 
-- [x] **Gap.** `Core/Sources/Clients/NotesClient.swift` imports
-      `DependenciesMacros`, but `.indigoFoundation` in
-      `Tuist/ProjectDescriptionHelpers/Project+Templates.swift` never lists it.
-      The import only resolves because `ComposableArchitecture` happens to link
-      it transitively. `AGENTS.md` tells contributors to check hygiene with
-      `tuist inspect implicit-imports`, which this violates, and the documented
-      four-step recipe for adding a package expects every used module to be
-      declared.
-- **Desired behavior.** Every module a first-party target imports is an explicit
-  dependency.
-- **Scope.** Add `.external(name: "DependenciesMacros")` to `.indigoFoundation`.
-  `"DependenciesMacros"` is already in `Package.swift`'s `frameworkProductTypes`
-  list, so no package change is needed. Leave the other unimported entries in
-  `.indigoFoundation` alone — the helper is deliberately batteries-included.
-- **Acceptance.** `mise exec -- tuist inspect implicit-imports` reports no
-  finding for `DependenciesMacros` in `Core`.
-- **Validation.** `mise exec -- tuist generate --no-open` then
-  `mise exec -- tuist build`.
-
-### 3. Align `JSONCoders.api` with the JSON the template actually exchanges
-
-- [x] **Gap.** `Core/Sources/Clients/JSONCoders.swift` configures `.api` with
-      `convertToSnakeCase`/`convertFromSnakeCase` and a plain `.iso8601` date
-      strategy. Both fight the only wire models the template ships.
-      `JWTAuthClient+Live.swift` declares `RefreshTokenRequest.refreshToken` and
-      `TokenResponse.accessToken`/`.refreshToken`, so the encoder silently
-      rewrites the refresh body to `{"refresh_token": …}` — a key the request
-      model never mentions — and the decoder expects `access_token` back. No
-      test catches it because nothing exercises the live path. Separately,
-      `.iso8601` accepts only `.withInternetDateTime`, so a timestamp carrying
-      fractional seconds (`…T12:00:00.123Z`, which JSON backends routinely emit)
-      throws `DecodingError.dataCorrupted`.
-- **Desired behavior.** `.api` round-trips the template's own models with their
-  declared key names and tolerates both ISO-8601 spellings on the way in.
-- **Scope.** Drop `keyEncodingStrategy` and `keyDecodingStrategy` so keys pass
-  through verbatim. Replace `decoder.dateDecodingStrategy = .iso8601` with a
-  `.custom` strategy that tries `ISO8601DateFormatter` with
-  `[.withInternetDateTime, .withFractionalSeconds]`, falls back to
-  `[.withInternetDateTime]`, and throws `DecodingError.dataCorrupted` naming the
-  offending string when neither parses. Keep
-  `encoder.dateEncodingStrategy = .iso8601`. Update the file's header comment,
-  which currently promises "snake_case on the wire", and the matching claim at
-  `Core/Sources/Clients/JWTAuthClient+Live.swift:64` that `.api` "handles
-  snake_case ⇄ camelCase by default". Both should say that keys are sent as
-  declared and point at the strategies as the thing to adjust per backend.
-  `JWTAuthClient+Live.swift` is the only consumer of `.api` today, so nothing
-  else needs touching.
-- **Acceptance.** `JSONCoders.swift` declares no key strategy; neither comment
-  claims key conversion; a `Date` encoded by `.api` and decoded by `.api`
-  survives the round trip.
-- **Validation.** Add `Core` tests: encoding a camelCase `Encodable` emits
-  `refreshToken`, not `refresh_token`; decoding
-  `{"accessToken":…,"refreshToken":…}` into a camelCase `Decodable` succeeds;
-  decoding an ISO-8601 timestamp succeeds both with and without fractional
-  seconds; decoding a malformed date string throws. `mise exec -- tuist generate
-  --no-open`, then `mise exec -- tuist test AllTests`.
-
-### 4. Build the token-refresh request with `HTTPRequestBuilder`
-
-- [x] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift` is the template's
-      only networking example, and it hand-assembles a `URLRequest`:
-      `URL(string: "\(host)/auth/refresh")!` force-unwrapped, `httpMethod`,
-      `Content-Type`, and `httpBody` set by hand. `HTTPRequestBuilder` ships in
-      `.indigoFoundation` for exactly this and is imported nowhere, so the
-      template demonstrates the opposite of the stack it bundles. The path also
-      omits the `api/v1` prefix that `docs/api-clients.md` uses throughout.
-- **Desired behavior.** The refresh call is declarative, has no force-unwrap, and
-  models the request shape every cloned project will copy.
-- **Scope.** Add `import HTTPRequestBuilder`, drop the manual `URLRequest`
-  construction, and replace it with the builder form. Keep the explicit result
-  annotation — `send` is overloaded on `Response<T, ServerError>` and
-  `SuccessResponse<T>`, so `T` cannot be inferred from a bare `.value`:
-
-  ```swift
-  let response: SuccessResponse<TokenResponse> = try await httpClient.send(
-    baseURL: host,
-    decoder: .api
-  ) {
-    Path("api", "v1", "auth", "refresh-access")
-    post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
-  }
-  return AuthTokens(
-    access: response.value.accessToken,
-    refresh: response.value.refreshToken
-  )
-  ```
-
-  `post` already applies the `POST` method and the JSON `Content-Type`/`Accept`
-  headers, so no manual header work remains. **Preserve the error mapping
-  exactly**: only `HTTPRequestClient.Error.badResponse(_, 401, _)` maps to
-  `AuthTokens.Error.refreshRejected`; everything else rethrows untouched. Keep
-  the explanatory comment. Do not change `host`, `RefreshTokenRequest`,
-  `TokenResponse`, or `JSONCoders`.
-- **Acceptance.** No `URL(string:)!` and no `httpMethod`/`setValue`/`httpBody`
-  assignment remains in the file; the closure returns `AuthTokens` built from the
-  decoded `TokenResponse`; the 401-only wipe contract described in `AGENTS.md` is
-  unchanged.
-- **Validation.** `mise exec -- tuist generate --no-open` then
-  `mise exec -- tuist build`. Add a `Core` test that drives the real closure:
-  `withDependencies { $0.httpRequestClient.send = { _, _ in throw HTTPRequestClient.Error.badResponse(UUID(), 401, "") } }`
-  around `JWTAuthClient.liveValue.refresh(…)` must surface
-  `AuthTokens.Error.refreshRejected`, and the same test with `500` must surface
-  the original `.badResponse`. `HTTPRequestClient` is a `@DependencyClient`, so
-  its single `send` endpoint is the only thing the test has to stub. Run with
-  `mise exec -- tuist test AllTests`.
-
-### 5. Add `APIErrorBody` for reading 4xx response bodies
-
-- [x] **Gap.** `HTTPRequestClient` reports non-2xx responses as
-      `.badResponse(_, status, body)` with the body as a raw `String`. The
-      template has no way to read it, so every 4xx collapses into an opaque
-      failure. `Core/Sources/IndigoError.swift` carries a single
-      `case invalidToken` and offers no server-message path. Depends on item 4
-      landing first so the new type has a live call site to document.
-- **Desired behavior.** A cloned project can recover the server's message and,
-  when the endpoint supplies one, a stable error code it can branch on — falling
-  back to the server's prose for everything else.
-- **Scope.** Add `Core/Sources/Clients/APIErrorBody.swift` with a
-  `public struct APIErrorBody: Decodable, Sendable` holding `error: String` and
-  `code: String?`, plus a `public static func from(_ error: any Error) -> APIErrorBody?`
-  that pattern-matches `HTTPRequestClient.Error.badResponse`, converts the body
-  string to `Data`, and decodes. Document the two fields as the template means
-  them: `error` is a human-readable server message suitable for display or
-  logging, and `code` is an optional stable machine-readable identifier that only
-  some endpoints send — which is why branching code must handle `nil`. Do not
-  promise that either field is localized; a cloned project's backend decides
-  that, and the doc comment should say so rather than guess. Do not change
-  `IndigoError` and do not wire this into `JWTAuthClient+Live` — the refresh
-  path's contract is status-code-based by design.
-- **Acceptance.** The type is public, `Sendable`, and returns `nil` for errors
-  that are not `.badResponse` and for bodies that fail to decode.
-- **Validation.** A `Core` test covering three cases: a well-formed
-  `{"error":…,"code":…}` body, a body without `code`, and a non-`.badResponse`
-  error. `mise exec -- tuist test AllTests`.
-
-### 6. Rewrite `docs/api-clients.md` against the shipped code
-
-- [x] **Gap.** The guide contradicts the template it documents. It tells readers
-      to add `kaishin/http-request-client` and `kaishin/jwt-auth-client` at
-      `from: "0.1.0"`; `Package.swift` actually uses `indigo-ce/http-request-client`
-      at 1.6.0 and `indigo-ce/jwt-auth-client` at 2.0.0. Its
-      `JWTAuthClient+Live` example returns the refresh result with **no error
-      mapping at all**, which silently reverts the 401-only credential-wipe
-      contract that the shipped code implements and `AGENTS.md` calls out — a
-      reader who follows the doc gets logged out by any timeout or 5xx. Its
-      "JSON Encoding/Decoding" section also defines its own
-      `JSONDecoder.shared` / `JSONEncoder.shared` and threads `decoder: .shared`
-      / `encoder: .shared` through eight call sites, while the template ships
-      `.api` in `Core/Sources/Clients/JSONCoders.swift`. Do this after items 3,
-      4, and 5 so the doc can describe coders and types that exist.
-- **Desired behavior.** Every snippet in the guide compiles against this
-  repository's dependencies and reflects the contracts it actually enforces.
-- **Scope.** Correct the package URLs and version floors; replace the
-  `JWTAuthClient+Live` snippet with the shipped implementation including the
-  `refreshRejected` mapping and its rationale; replace the hand-rolled `.shared`
-  coder definitions with a pointer to `JSONCoders.swift` instead of restating
-  the strategies, and rename every `decoder: .shared` / `encoder: .shared` call
-  site to `.api`; add a short section on surfacing server errors via
-  `APIErrorBody`. Keep the existing structure (single vs. domain clients, path
-  styles, request building, testing) and the `Path("api", "v1", …)` convention.
-  Documentation only — no source changes.
-- **Acceptance.** `rg 'kaishin/|\.shared' docs/api-clients.md` returns nothing:
-  no `kaishin/…` package URL, no `static let shared` coder definition, and no
-  `decoder:`/`encoder: .shared` argument survives. The refresh example maps 401
-  and only 401.
-- **Validation.** Cross-read each snippet against `Package.swift`,
-  `Core/Sources/Clients/APIErrorBody.swift`,
-  `Core/Sources/Clients/JSONCoders.swift`, and
-  `Core/Sources/Clients/JWTAuthClient+Live.swift`. No build required.
-
-### 7. Standardize on `mise exec -- tuist` and fix the stale version in the guide
-
-- [x] **Gap.** The repo pins Tuist in `mise.toml` (4.202.2) but instructs bare
-      `tuist` almost everywhere: `AGENTS.md` (lines 15–17, 21–22, 39),
-      `.github/workflows/tests.yml` (lines 27, 30, 33), `README.md` (26–27,
-      104–107, 115), `docs/migration-guide.md` (540, 543, 663–670),
-      `.agents/skills/xcode-snapshot/SKILL.md`,
-      `.agents/skills/tuist-inspect/SKILL.md`,
-      `.agents/skills/using-tuist-generated-projects/SKILL.md`,
-      `.agents/skills/swift-upgrade/SKILL.md`, and
-      `.agents/skills/bootstrap/SKILL.md:36`. Only `ci_scripts/ci_post_clone.sh`
-      goes through `mise exec --`. A shell without a mise hook resolves whatever
-      `tuist` is on `PATH`, and a version mismatch corrupts the `.build`
-      checkout state and breaks macro expansion across the workspace.
-      Separately, `docs/migration-guide.md:68` still writes `tuist = "4.200.5"`
-      into a generated `mise.toml`, which is behind the repo's own pin.
-- **Desired behavior.** One documented invocation everywhere, and a migration
-  guide that pins the version this repository actually uses.
-- **Scope.** Replace bare `tuist …` with `mise exec -- tuist …` across the files
-  above; update `docs/migration-guide.md:68` to `4.202.2`. Add one line to
-  `AGENTS.md`'s "Build & test" section stating why (`mise.toml` is the pin; a
-  stale `PATH` binary corrupts SPM state). Leave `ci_scripts/ci_post_clone.sh`
-  as is. Do not change the pinned version in `mise.toml`. Line numbers are a
-  starting point, not the contract — re-grep for `tuist ` before finishing, since
-  earlier edits in the same file shift them.
-- **Acceptance.** Every runnable `tuist` command in `AGENTS.md`, `README.md`,
-  `docs/`, `.agents/`, and `.github/` is prefixed with `mise exec --`. Prose
-  mentions (scheme names, command descriptions like "`tuist test AllTests`" in
-  `Workspace.swift`'s comment) may stay unprefixed.
-- **Validation.** Confirm the workflow file still parses as valid YAML and that
-  `mise exec -- tuist generate --no-open` succeeds locally.
-
-### 8. Make the `Sharing` → `SwiftSharing` module alias usable by first-party targets
-
-- [x] **Gap.** `Package.swift` renames the `Sharing` product to `SwiftSharing`
-      and applies `-module-alias Sharing=SwiftSharing` to the external targets
-      that need it. `Project.framework(…)` exposes a `usesSharing: Bool = false`
-      parameter that applies the same flag, but **no project passes `true`** —
-      `App`, `Core`, `Components`, `NotesListFeature`, and `NoteEditorFeature`
-      all take the default. Meanwhile `AGENTS.md` instructs contributors to read
-      with `@FetchAll` wrapped in `@ObservationStateIgnored` and lists `Sharing`
-      as a foundation dependency. Anyone following that guidance writes
-      `import Sharing` in a feature target and hits an unresolved-module error
-      with no hint that a manifest flag is the fix.
-- **Desired behavior.** The flag is either exercised by the template or clearly
-  documented, so the failure is impossible to stumble into.
-- **Scope.** Pass `usesSharing: true` in `Core/Project.swift` (the module that
-  owns persistence and would import `Sharing` first) and document the rule in
-  `AGENTS.md` under "Dependencies": any target that imports `Sharing` must be
-  declared with `usesSharing: true`, because the product ships aliased as
-  `SwiftSharing`. Add the same note to the `usesSharing` parameter in
-  `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`. No feature rewrite
-  and no new `@FetchAll` usage in this item — that is a separate design change.
-- **Acceptance.** `Core/Project.swift` sets `usesSharing: true`; `AGENTS.md`
-  states the rule; the generated `Core` target carries
-  `-module-alias Sharing=SwiftSharing` in `OTHER_SWIFT_FLAGS`.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build`. Temporarily adding `import Sharing` to a `Core`
-  source must compile; revert before committing.
-
-### 9. Wire the DEBUG network console to the existing shake modifier
-
-- [x] **Gap.** The template links `PulseUI` through `.indigoFoundation` and ships
-      `Components/Sources/View+OnShake.swift`, and neither is used anywhere —
-      `PulseUI` is imported by no source file and `onShake` has no call site.
-      `README.md` and the dependency list advertise network debugging that the
-      running app does not provide, so the cost of both is paid for nothing.
-- **Desired behavior.** In DEBUG, requests made by the app are captured and a
-  shake opens the console; release builds are untouched.
-- **Scope.** Three changes. (a) Add `.external(name: "Pulse")` to
-  `.indigoFoundation` in `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`
-  — `URLSessionProxy` and `URLSessionProtocol` are `Pulse` types, not `PulseUI`
-  ones, and `"Pulse"` is already in `Package.swift`'s `frameworkProductTypes`, so
-  no package change is needed. (b) In
-  `Core/Sources/Clients/JWTAuthClient+Live.swift`, `import Pulse` and add a
-  module-level `URLSessionProtocol` — `URLSessionProxy(configuration: .default)`
-  under `#if DEBUG`, plain `URLSession(configuration: .default)` otherwise — then
-  pass it as the `urlSession:` argument of the refresh call. (c) In
-  `App/Sources/IndigoApp.swift`, add a `#if DEBUG` `@State` flag on the root
-  view, present `PulseUI`'s `ConsoleView` in a `.fullScreenCover`, and toggle it
-  from `.onShake { … }`. Guard the console presentation with `#if os(iOS)` —
-  `onShake` is iOS-only. Requires item 4: the refresh call must already go
-  through `httpClient.send(baseURL:decoder:urlSession:middleware:)`, which is
-  where the `urlSession:` argument exists.
-- **Acceptance.** A Release build contains no `PulseUI` view code and no
-  `URLSessionProxy`; a DEBUG iOS build presents the console on shake; macOS
-  builds are unaffected.
+- [ ] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift:9-12` declares
+      `nonisolated(unsafe) var indigoSession: URLSessionProtocol` at module
+      scope. It is a **mutable** global that opts out of concurrency checking,
+      and it does not need to be either: `URLSessionProtocol` is declared
+      `Sendable` by `Pulse`, so `any URLSessionProtocol` is a `Sendable` type and
+      a plain `let` is concurrency-safe without the annotation. Every cloned
+      project copies an unsafe mutable global as the template's example of how to
+      hold a session. It also lives inside the auth file, so the next client
+      added to `Core/Sources/Clients` has no obvious shared session to reuse and
+      will declare a second one — defeating the DEBUG capture that item 9 wired
+      up, since only proxied sessions reach the console.
+- **Desired behavior.** One session value, immutable, declared somewhere a new
+  client will find it.
+- **Scope.** Move the declaration to a new
+  `Core/Sources/Clients/NetworkSession.swift`, change it to
+  `let indigoSession: URLSessionProtocol = …` and drop `nonisolated(unsafe)`.
+  Keep the `#if DEBUG` `URLSessionProxy` / `#else` `URLSession` split and the
+  `indigoSession` name exactly as they are. Add a doc comment stating that every
+  client in `Core` should pass this as `urlSession:` so DEBUG builds capture all
+  traffic in one console. Remove the now-unused `import Pulse` from
+  `JWTAuthClient+Live.swift` only if nothing else in that file needs it.
+- **Acceptance.** `rg 'nonisolated\(unsafe\)' Core/` returns nothing;
+  `indigoSession` is declared exactly once, as a `let`, in `NetworkSession.swift`;
+  the refresh call still passes `urlSession: indigoSession`.
 - **Validation.** `mise exec -- tuist generate --no-open`, then
   `mise exec -- tuist build Indigo --configuration Debug` and
   `mise exec -- tuist build "Indigo Release" --configuration Release` to prove
-  the `#if` guards compile both ways — passing the scheme name alone does not
-  select the configuration. `mise exec -- tuist test AllTests` must stay green.
+  both `#if` branches still compile. `mise exec -- tuist test AllTests` stays
+  green, and `mise exec -- tuist inspect implicit-imports` reports nothing new.
+
+### 3. Correct the authentication section of `docs/api-clients.md`
+
+- [ ] **Gap.** The guide misstates the library contract it documents. Lines
+      309–314 claim `sendAuthenticated` "retrieves the current access token",
+      "if the request fails with 401, automatically refreshes the token", and
+      "retries the original request with the new token". `JWTAuthClient`
+      does none of that: `sendAuthenticated` calls `refreshExpiredTokens()`
+      *before* sending, based on locally decoding the access token's expiry, and
+      there is **no** 401 retry — a 401 from a business endpoint propagates to
+      the caller untouched. A reader who trusts the doc writes no 401 handling
+      and gets silent failures. The section is also silent on the session
+      lifecycle a clone has to implement (where tokens live, who persists them,
+      what happens after a rejected refresh), and its `JWTAuthClient+Live`
+      snippet omits the `urlSession:` argument the shipped file passes. Do this
+      after items 1 and 2 so it can point at the real launch call site and the
+      final session declaration.
+- **Desired behavior.** The section describes what the linked packages actually
+  do and gives a clone the whole session lifecycle in one place.
+- **Scope.** Documentation only.
+  - Rewrite the numbered `sendAuthenticated` list: it refreshes first when the
+    stored access token has already expired, attaches
+    `Authorization: Bearer <token>`, and sends once. Say explicitly that a 401
+    from a business endpoint is **not** retried and is the caller's to handle —
+    cross-reference the `APIErrorBody` section for reading the body.
+  - Add a "Session lifecycle" subsection covering: `@Shared(.authSession)` as
+    the single in-memory source of truth (`.missing` / `.expired` / `.valid`);
+    `authTokensClient.save`/`destroy`/`set` as the only writers, which update
+    memory *and* the keychain together; `loadSession()` restoring the keychain
+    into memory on launch; and the fact that `refreshExpiredTokens()` returns
+    **without throwing** when the server rejects the refresh token — it destroys
+    the credentials, and the next `sendAuthenticated` is what throws
+    `AuthTokens.Error.missingToken`. Point at the root feature added in item 1 as
+    the launch call site.
+  - Note that `.expired` still holds a usable refresh token, so UI should treat
+    it as signed in rather than falling back to a login screen; only `.missing`
+    and `nil` mean "no session".
+  - Add `urlSession: indigoSession` to the refresh snippet so it matches
+    `Core/Sources/Clients/JWTAuthClient+Live.swift`.
+- **Acceptance.** No sentence in the guide claims a 401 retry or an automatic
+  post-failure refresh; the session-lifecycle subsection exists and names
+  `@Shared(.authSession)`, `authTokensClient`, and `loadSession()`; the refresh
+  snippet is a character-for-character match with the shipped closure body.
+- **Validation.** Cross-read each snippet against
+  `Core/Sources/Clients/JWTAuthClient+Live.swift`,
+  `Core/Sources/Clients/NetworkSession.swift`, and the `RootFeature` source. No
+  build required.
+
+### 4. Give the `App` target the `Sharing` module alias
+
+- [ ] **Gap.** `AGENTS.md` states the rule "any target that imports `Sharing`
+      must be declared with `usesSharing: true`", but that rule is
+      unsatisfiable for the one target it matters most for. `App/Project.swift`
+      declares its target with a raw `.target(…)` call, not
+      `Project.framework(…)`, so there is no `usesSharing` switch and no
+      `-module-alias Sharing=SwiftSharing` in its `OTHER_SWIFT_FLAGS`. Adding
+      `import Sharing` to `App/Sources/IndigoApp.swift` fails with an unresolved
+      module and the documented fix does not apply. The app target is where a
+      clone adds scene-level shared state, so this is a trap with no signpost.
+- **Desired behavior.** The app target obeys the same alias rule as every
+  framework target, and `AGENTS.md` says how.
+- **Scope.** Add
+  `"OTHER_SWIFT_FLAGS": "$(inherited) -module-alias Sharing=SwiftSharing"` to the
+  app target's base settings in `App/Project.swift`, and the same to the
+  `\(appTarget.targetName)Tests` target so a test can import `Sharing` too (that
+  target currently passes no `settings:` at all — add one). Extend the
+  `AGENTS.md` "Dependencies" rule with a sentence covering the app target: it is
+  declared directly rather than through `Project.framework`, so it sets the flag
+  by hand. Change nothing in `Package.swift` or `Project+Templates.swift`.
+- **Acceptance.** The generated app and test targets both carry
+  `-module-alias Sharing=SwiftSharing` in `OTHER_SWIFT_FLAGS`; `AGENTS.md`
+  documents the manual form.
+- **Validation.** `mise exec -- tuist generate --no-open`, then
+  `mise exec -- tuist build`. Temporarily add `import Sharing` to
+  `App/Sources/IndigoApp.swift` and to `App/Tests/AppTests.swift`; both must
+  compile. Revert both before committing.
+
+### 5. Map the version build settings into the app's `Info.plist`
+
+- [ ] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
+      `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
+      `Core/Sources/Bundle+Extension.swift` ships `releaseVersionNumber`,
+      `buildVersionNumber`, and `fullVersionString`, which read
+      `CFBundleShortVersionString` and `CFBundleVersion` out of the Info.plist.
+      Nothing connects the two: `App/Project.swift` passes
+      `infoPlist: .extendingDefault(with:)` with only `UILaunchScreen`, so the
+      bundle gets Tuist's defaults and the xcconfig values never reach it.
+      Bumping the version in the xcconfig — the one place a clone would look —
+      changes nothing the app can report.
+- **Desired behavior.** The xcconfig is the single place a version is set, and
+  the bundle reflects it.
+- **Scope.** Add `"CFBundleShortVersionString": "$(MARKETING_VERSION)"` and
+  `"CFBundleVersion": "$(CURRENT_PROJECT_VERSION)"` to the `.extendingDefault`
+  dictionary in `App/Project.swift`. Do not change the values in either
+  xcconfig, do not touch `Bundle+Extension.swift`, and do not add a plist to any
+  framework target — only the app bundle carries a user-facing version.
+- **Acceptance.** The generated app Info.plist under `App/Derived/InfoPlists/`
+  (filename follows `appTarget`) contains both keys with the `$(…)` references,
+  and a Debug build resolves `CFBundleShortVersionString` to `0.0.1`.
+- **Validation.** `mise exec -- tuist generate --no-open`, then
+  `rg 'MARKETING_VERSION|CURRENT_PROJECT_VERSION' App/Derived/InfoPlists/`.
+  Build with `mise exec -- tuist build` and read
+  `CFBundleShortVersionString` back out of the built `Info.plist` with
+  `plutil -p`.
+
+## Completed
+
+Shipped and merged; kept as a short record so the work is not re-proposed.
+
+- [x] Upgrade the Swift toolchain and dependency graph
+- [x] Declare `DependenciesMacros` in `.indigoFoundation`
+- [x] Align `JSONCoders.api` with the JSON the template actually exchanges
+- [x] Build the token-refresh request with `HTTPRequestBuilder`
+- [x] Add `APIErrorBody` for reading 4xx response bodies
+- [x] Rewrite `docs/api-clients.md` against the shipped code
+- [x] Standardize runnable commands on `mise exec -- tuist`
+- [x] Make the `Sharing` → `SwiftSharing` module alias usable by `Core`
+- [x] Wire the DEBUG network console to the existing shake modifier
