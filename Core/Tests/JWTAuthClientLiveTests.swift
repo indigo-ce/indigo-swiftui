@@ -53,14 +53,12 @@ private final class RefreshStubProtocol: URLProtocol {
     -> AuthTokens
   {
     RefreshStubProtocol.stub = RefreshStubProtocol.Stub(statusCode: statusCode, body: body)
-    let originalSession = indigoSession
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [RefreshStubProtocol.self]
-    indigoSession = URLSession(configuration: configuration)
-    defer { indigoSession = originalSession }
     return try await withDependencies {
       // The live pipeline is the subject under test; only the transport is stubbed.
       $0.httpRequestClient = .liveValue
+      $0.networkSession = URLSession(configuration: configuration)
     } operation: {
       try await JWTAuthClient.liveValue.refresh(tokens)
     }
