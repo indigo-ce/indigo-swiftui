@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Correct the authentication section of `docs/api-clients.md`
 
-- [ ] **Gap.** The guide misstates the library contract it documents. Lines
+- [x] **Gap.** The guide misstates the library contract it documents. Lines
       309–314 claim `sendAuthenticated` "retrieves the current access token",
       "if the request fails with 401, automatically refreshes the token", and
       "retries the original request with the new token". `JWTAuthClient`
