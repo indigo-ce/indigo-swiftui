@@ -7,57 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Put the shared network session behind a `Core` dependency
-
-- [x] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift:8-12` declares
-      `nonisolated(unsafe) var indigoSession: URLSessionProtocol` at module
-      scope — a **mutable** global that opts out of concurrency checking. It is
-      mutable only because `Core/Tests/JWTAuthClientLiveTests.swift:56-60`
-      assigns to it to install a `URLProtocol` stub, so the one shipped example
-      of injecting a session is "reach into another module's global and put it
-      back in a `defer`", which forces the suite to stay `.serialized`. The
-      declaration also lives inside the auth file, so the next client added under
-      `Core/Sources/Clients` has no obvious session to reuse and will declare a
-      second one — defeating the shipped DEBUG network console, since only
-      traffic on a `URLSessionProxy` session reaches it.
-- **Desired behavior.** One session value, immutable in the app, overridable per
-  test through the dependency system the rest of the codebase already uses, and
-  declared where a new client will find it.
-- **Scope.**
-  - Add `Core/Sources/Clients/NetworkSession.swift` with a dependency key —
-    `public enum NetworkSessionKey: DependencyKey` whose `liveValue` keeps the
-    existing `#if DEBUG` `URLSessionProxy(configuration: .default)` / `#else`
-    `URLSession(configuration: .default)` split, typed as
-    `any URLSessionProtocol` — plus a `networkSession` accessor on
-    `DependencyValues`. `URLSessionProtocol` is `Sendable`, so `liveValue` is a
-    plain `static let` with no `nonisolated(unsafe)`. Do **not** implement
-    `testValue`: the library default reports an issue when a test reaches the
-    session without overriding it, which is the behavior we want. Document on
-    the key that every client in `Core` should pass
-    `urlSession: networkSession` so DEBUG builds capture all traffic in one
-    console.
-  - Delete the `indigoSession` global. In the `refresh` closure add
-    `@Dependency(\.networkSession) var networkSession` beside the existing
-    `@Dependency(\.httpRequestClient)` and pass `urlSession: networkSession`.
-    Drop `import Pulse` from `JWTAuthClient+Live.swift` once nothing in the file
-    needs it.
-  - Rework `JWTAuthClientLiveTests.refresh(tokens:statusCode:body:)`: delete the
-    read/assign/`defer`-restore of the global and instead set
-    `$0.networkSession = URLSession(configuration: configuration)` in the
-    existing `withDependencies` block next to `$0.httpRequestClient`. Keep the
-    `.serialized` trait — `RefreshStubProtocol.stub` is still shared mutable
-    state.
-- **Acceptance.** `rg 'nonisolated\(unsafe\)' Core/Sources` returns nothing; the
-  session is declared exactly once, in `NetworkSession.swift`; the refresh call
-  passes `urlSession: networkSession`; both refresh tests pass with the
-  transport stubbed only through `withDependencies`.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build Indigo --configuration Debug` and
-  `mise exec -- tuist build "Indigo Release" --configuration Release` to prove
-  both `#if` branches still compile. `mise exec -- tuist test AllTests` stays
-  green, and `mise exec -- tuist inspect implicit-imports` reports nothing new.
-
-### 2. Correct the authentication section of `docs/api-clients.md`
+### 1. Correct the authentication section of `docs/api-clients.md`
 
 - [ ] **Gap.** The guide misstates the library contract it documents. Lines
       309–314 claim `sendAuthenticated` "retrieves the current access token",
@@ -69,12 +19,17 @@ do not rely on a simulator run.
       the caller untouched. A reader who trusts the doc writes no 401 handling
       and gets silent failures. The section is also silent on the session
       lifecycle a clone has to implement (where tokens live, who persists them,
-      what happens after a rejected refresh), and its `JWTAuthClient+Live`
-      snippet omits the `urlSession:` argument the shipped file passes.
-      `AGENTS.md` has a smaller version of the same problem: its
-      "Networking / auth" bullet names the refresh endpoint `/auth/refresh`,
-      while the shipped path is `api/v1/auth/refresh-access`. Do this after item
-      1 so the snippet can name the final session declaration.
+      what happens after a rejected refresh). The snippets are stale in two more
+      ways: the `JWTAuthClient+Live` block at lines 236–278 omits the
+      `@Dependency(\.networkSession)` line and the
+      `urlSession:` argument the shipped file now passes, and every
+      `sendAuthenticated` / `send` example (lines 296–331, 379, 391, 534–539)
+      omits `urlSession:` too, so a reader copying them silently sends on
+      `URLSession.shared` and their traffic never reaches the DEBUG network
+      console — the exact mistake `Core/Sources/Clients/NetworkSession.swift`
+      documents against. `AGENTS.md` has a smaller version of the same problem:
+      its "Networking / auth" bullet names the refresh endpoint `/auth/refresh`,
+      while the shipped path is `api/v1/auth/refresh-access`.
 - **Desired behavior.** The section describes what the linked packages actually
   do and gives a clone the whole session lifecycle in one place.
 - **Scope.** Documentation only.
@@ -100,19 +55,26 @@ do not rely on a simulator run.
     `@Dependency(\.networkSession)` line and the `urlSession: networkSession`
     argument, and a pointer to `Core/Sources/Clients/NetworkSession.swift` as
     the session every client shares.
+  - Add `urlSession: networkSession` to the `send` / `sendAuthenticated`
+    examples, with one sentence saying the parameter defaults to
+    `URLSession.shared` and that passing the shared session is what routes a
+    DEBUG build's traffic into the network console. Fix the
+    "automatically includes JWT and handles refresh" code comment above the
+    first example to match the corrected list.
   - Fix the refresh endpoint path in the `AGENTS.md` "Networking / auth" bullet
     to `api/v1/auth/refresh-access`.
 - **Acceptance.** No sentence in the guide claims a 401 retry or an automatic
   post-failure refresh; the session-lifecycle subsection exists and names
   `@Shared(.authSession)`, `authTokensClient`, and `loadSession()`; the refresh
-  snippet is a character-for-character match with the shipped closure body; no
-  file under `docs/` or `AGENTS.md` still names `/auth/refresh`.
+  snippet is a character-for-character match with the shipped closure body; every
+  `send`/`sendAuthenticated` example passes `urlSession:`; no file under `docs/`
+  or `AGENTS.md` still names `/auth/refresh`.
 - **Validation.** Cross-read each snippet against
   `Core/Sources/Clients/JWTAuthClient+Live.swift`,
   `Core/Sources/Clients/NetworkSession.swift`, and
   `RootFeature/Sources/RootView.swift`. No build required.
 
-### 3. Extend `usesSharing` to the generated test targets
+### 2. Extend `usesSharing` to the generated test targets
 
 - [ ] **Gap.** `Project.framework(usesSharing:)` in
       `Tuist/ProjectDescriptionHelpers/Project+Templates.swift:43-74` applies
@@ -147,7 +109,7 @@ do not rely on a simulator run.
   `Core/Tests/CoreTests.swift`, run `mise exec -- tuist test AllTests`, and
   revert the import before committing.
 
-### 4. Map the version build settings into the app's `Info.plist`
+### 3. Map the version build settings into the app's `Info.plist`
 
 - [ ] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
       `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
@@ -190,3 +152,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Wire the DEBUG network console to the existing shake modifier
 - [x] Bootstrap the stored auth session at the app root
 - [x] Give the `App` target the `Sharing` module alias
+- [x] Put the shared network session behind a `Core` dependency
