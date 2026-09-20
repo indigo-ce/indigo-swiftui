@@ -316,8 +316,12 @@ extension DependencyValues {
 Tokens live in two layers, and the library keeps them in lockstep:
 
 - `@Shared(.authSession)` is the single in-memory source of truth. It holds an
-  `AuthSession?` — `.missing`, `.expired(tokens)`, or `.valid(tokens)` — with
-  `nil` meaning no session has been loaded yet.
+  `AuthSession?` — `.missing`, `.expired(tokens)`, or `.valid(tokens)` — where
+  `nil` means "no current session": both before the first `loadSession()` and
+  after `destroy()` (an explicit logout, or a rejected refresh that wiped the
+  credentials). Don't use it to tell "loading" from "signed out" — track
+  readiness separately, the way `RootFeature` does with its `isSessionLoaded`
+  flag in `RootFeature/Sources/RootView.swift`.
 - `authTokensClient.save(_:)`, `.destroy()`, and `.set(_:)` are the only
   writers. Each one updates the in-memory session and the keychain together,
   so memory and persistent state never drift apart. Never assign
