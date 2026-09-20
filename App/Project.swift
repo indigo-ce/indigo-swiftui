@@ -28,7 +28,7 @@ let project = Project(
       dependencies: [
         .project(target: "Core", path: .relativeToRoot("Core")),
         .project(target: "Components", path: .relativeToRoot("Components")),
-        .project(target: "NotesListFeature", path: .relativeToRoot("NotesListFeature"))
+        .project(target: "RootFeature", path: .relativeToRoot("RootFeature"))
       ] + .indigoFoundation,
       settings: .settings(
         base: [

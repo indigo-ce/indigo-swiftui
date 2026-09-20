@@ -1,7 +1,7 @@
 import ComposableArchitecture
 import Core
 import Dependencies
-import NotesListFeature
+import RootFeature
 import SQLiteData
 import SwiftUI
 
@@ -14,8 +14,8 @@ import SwiftUI
 
 @main
 struct IndigoApp: App {
-  static let store = Store(initialState: NotesListFeature.State()) {
-    NotesListFeature()
+  static let store = Store(initialState: RootFeature.State()) {
+    RootFeature()
   }
 
   init() {
@@ -30,7 +30,7 @@ struct IndigoApp: App {
 
   var body: some Scene {
     WindowGroup {
-      NotesListView(store: Self.store)
+      RootView(store: Self.store)
 #if DEBUG
 #if os(iOS)
         .fullScreenCover(isPresented: $isConsolePresented) {

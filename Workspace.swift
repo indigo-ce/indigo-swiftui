@@ -8,7 +8,8 @@ let workspace = Workspace(
     "Core",
     "Components",
     "NoteEditorFeature",
-    "NotesListFeature"
+    "NotesListFeature",
+    "RootFeature"
   ],
   schemes: [
     // Aggregates every module's tests into one run-all surface. A project-level
@@ -27,7 +28,8 @@ let workspace = Workspace(
           ),
           .testableTarget(
             target: .project(path: "NoteEditorFeature", target: "NoteEditorFeatureTests")
-          )
+          ),
+          .testableTarget(target: .project(path: "RootFeature", target: "RootFeatureTests"))
         ],
         configuration: "Debug"
       )
