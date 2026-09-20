@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Put the shared network session behind a `Core` dependency
 
-- [ ] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift:8-12` declares
+- [x] **Gap.** `Core/Sources/Clients/JWTAuthClient+Live.swift:8-12` declares
       `nonisolated(unsafe) var indigoSession: URLSessionProtocol` at module
       scope — a **mutable** global that opts out of concurrency checking. It is
       mutable only because `Core/Tests/JWTAuthClientLiveTests.swift:56-60`
