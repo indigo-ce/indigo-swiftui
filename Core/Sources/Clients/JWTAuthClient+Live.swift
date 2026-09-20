@@ -6,9 +6,9 @@ import JWTAuth
 import Pulse
 
 #if DEBUG
-  let indigoSession: URLSessionProtocol = URLSessionProxy(configuration: .default)
+  nonisolated(unsafe) var indigoSession: URLSessionProtocol = URLSessionProxy(configuration: .default)
 #else
-  let indigoSession: URLSessionProtocol = URLSession(configuration: .default)
+  nonisolated(unsafe) var indigoSession: URLSessionProtocol = URLSession(configuration: .default)
 #endif
 
 // MARK: - Live implementation
