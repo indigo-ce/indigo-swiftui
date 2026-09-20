@@ -87,7 +87,7 @@ do not rely on a simulator run.
 
 ### 3. Give the `App` target the `Sharing` module alias
 
-- [ ] **Gap.** `AGENTS.md` states the rule "any target that imports `Sharing`
+- [x] **Gap.** `AGENTS.md` states the rule "any target that imports `Sharing`
       must be declared with `usesSharing: true`", but that rule is
       unsatisfiable for the one target it matters most for. `App/Project.swift`
       declares its target with a raw `.target(…)` call, not
