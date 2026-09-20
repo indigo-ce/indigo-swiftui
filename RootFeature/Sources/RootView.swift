@@ -68,12 +68,19 @@ public struct RootView: View {
   }
 
   public var body: some View {
-    if store.isSessionLoaded {
-      NotesListView(
-        store: store.scope(state: \.notesList, action: \.notesList)
-      )
-    } else {
-      ProgressView()
+    Group {
+      if store.isSessionLoaded {
+        NotesListView(
+          store: store.scope(state: \.notesList, action: \.notesList)
+        )
+      } else {
+        ProgressView()
+      }
+    }
+    // Kicks off the auth bootstrap exactly once per launch; without this the
+    // session is never loaded and the progress view never resolves.
+    .task {
+      await store.send(.task).finish()
     }
   }
 }
