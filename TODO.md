@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Bootstrap the stored auth session at the app root
 
-- [ ] **Gap.** The template ships a complete auth stack that nothing switches on.
+- [x] **Gap.** The template ships a complete auth stack that nothing switches on.
       `Core/Sources/Clients/JWTAuthClient+Live.swift` implements the refresh
       contract, `.indigoFoundation` links `JWTAuth` and `SimpleKeychain`, and
       `AGENTS.md` sells "JWTAuth with automatic token refresh" — but
