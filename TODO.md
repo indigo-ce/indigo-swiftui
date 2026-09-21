@@ -7,80 +7,86 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Correct the authentication section of `docs/api-clients.md`
+### 1. Take the launch token refresh off the app's first frame
 
-- [x] **Gap.** The guide misstates the library contract it documents. Lines
-      309–314 claim `sendAuthenticated` "retrieves the current access token",
-      "if the request fails with 401, automatically refreshes the token", and
-      "retries the original request with the new token". `JWTAuthClient`
-      does none of that: `sendAuthenticated` calls `refreshExpiredTokens()`
-      *before* sending, based on locally decoding the access token's expiry, and
-      there is **no** 401 retry — a 401 from a business endpoint propagates to
-      the caller untouched. A reader who trusts the doc writes no 401 handling
-      and gets silent failures. The section is also silent on the session
-      lifecycle a clone has to implement (where tokens live, who persists them,
-      what happens after a rejected refresh). The snippets are stale in two more
-      ways: the `JWTAuthClient+Live` block at lines 236–278 omits the
-      `@Dependency(\.networkSession)` line and the
-      `urlSession:` argument the shipped file now passes, and every
-      `sendAuthenticated` / `send` example (lines 296–331, 379, 391, 534–539)
-      omits `urlSession:` too, so a reader copying them silently sends on
-      `URLSession.shared` and their traffic never reaches the DEBUG network
-      console — the exact mistake `Core/Sources/Clients/NetworkSession.swift`
-      documents against. `AGENTS.md` has a smaller version of the same problem:
-      its "Networking / auth" bullet names the refresh endpoint `/auth/refresh`,
-      while the shipped path is `api/v1/auth/refresh-access`.
-- **Desired behavior.** The section describes what the linked packages actually
-  do and gives a clone the whole session lifecycle in one place.
-- **Scope.** Documentation only.
-  - Rewrite the numbered `sendAuthenticated` list: it refreshes first when the
-    stored access token has already expired, attaches
-    `Authorization: Bearer <token>`, and sends once. Say explicitly that a 401
-    from a business endpoint is **not** retried and is the caller's to handle —
-    cross-reference the `APIErrorBody` section for reading the body.
-  - Add a "Session lifecycle" subsection covering: `@Shared(.authSession)` as
-    the single in-memory source of truth (`.missing` / `.expired` / `.valid`);
-    `authTokensClient.save`/`destroy`/`set` as the only writers, which update
-    memory *and* the keychain together; `loadSession()` restoring the keychain
-    into memory on launch; and the fact that `refreshExpiredTokens()` returns
-    **without throwing** when the server rejects the refresh token — it destroys
-    the credentials, and the next `sendAuthenticated` is what throws
-    `AuthTokens.Error.missingToken`. Point at `RootFeature`'s `.task` in
-    `RootFeature/Sources/RootView.swift` as the shipped launch call site.
-  - Note that `.expired` still holds a usable refresh token, so UI should treat
-    it as signed in rather than falling back to a login screen; only `.missing`
-    and `nil` mean "no session".
-  - Bring the refresh snippet back in line with
-    `Core/Sources/Clients/JWTAuthClient+Live.swift`: the
-    `@Dependency(\.networkSession)` line and the `urlSession: networkSession`
-    argument, and a pointer to `Core/Sources/Clients/NetworkSession.swift` as
-    the session every client shares.
-  - Add `urlSession: networkSession` to the `send` / `sendAuthenticated`
-    examples, with one sentence saying the parameter defaults to
-    `URLSession.shared` and that passing the shared session is what routes a
-    DEBUG build's traffic into the network console. Fix the
-    "automatically includes JWT and handles refresh" code comment above the
-    first example to match the corrected list.
-  - Fix the refresh endpoint path in the `AGENTS.md` "Networking / auth" bullet
-    to `api/v1/auth/refresh-access`.
-- **Acceptance.** No sentence in the guide claims a 401 retry or an automatic
-  post-failure refresh; the session-lifecycle subsection exists and names
-  `@Shared(.authSession)`, `authTokensClient`, and `loadSession()`; the refresh
-  snippet is a character-for-character match with the shipped closure body; every
-  `send`/`sendAuthenticated` example passes `urlSession:`; no file under `docs/`
-  or `AGENTS.md` still names `/auth/refresh`.
-- **Validation.** Cross-read each snippet against
-  `Core/Sources/Clients/JWTAuthClient+Live.swift`,
-  `Core/Sources/Clients/NetworkSession.swift`, and
-  `RootFeature/Sources/RootView.swift`. No build required.
+- [ ] **Gap.** `RootFeature`'s `.task` in `RootFeature/Sources/RootView.swift`
+      awaits `authClient.refreshExpiredTokens()` and only afterwards sends
+      `.sessionLoaded`, which flips `isSessionLoaded` and lets `RootView` swap
+      its `ProgressView` for `NotesListView`. That one call does two very
+      different things: `loadSession()`, a local keychain read, and — only when
+      the stored access token has already expired — a network round trip to
+      `api/v1/auth/refresh-access`. Gating the first frame on the second means a
+      cold launch with stored-but-expired tokens on a slow or unreachable
+      network holds the whole UI behind a spinner until that request times out,
+      even though everything `RootView` shows comes from the local database
+      (`NotesListFeature` → `notesClient` → `@Dependency(\.defaultDatabase)`)
+      and needs no session at all. `docs/api-clients.md` presents this shape as
+      "the shipped launch call site to copy", so every clone inherits it.
+      Second half of the same gap: `RootFeature.State` declares
+      `@Shared(.authSession) var authSession` and no code anywhere in the
+      template reads it. The rule the guide states in prose — `.expired` still
+      holds a usable refresh token, so it counts as signed in, and only
+      `.missing`/`nil` mean "no session" — has no expression in code, so a clone
+      writing its first auth-gated screen has nothing to copy and will reach for
+      `case .valid` alone.
+- **Desired behavior.** "Ready" means the persisted session has been restored
+  from the keychain — a local operation that cannot stall. The network refresh
+  settles afterwards in the background and republishes `@Shared(.authSession)`
+  when it lands. The signed-in test lives in one named place that tests pin.
+- **Scope.** `RootFeature/Sources/RootView.swift`,
+  `RootFeature/Tests/RootFeatureTests.swift`, and the "Session Lifecycle"
+  section of `docs/api-clients.md`. No other module changes; no new dependency,
+  action-level API for features, or UI beyond what is listed here.
+  - Split the `.task` effect into `try? await authClient.loadSession()`, then
+    `await send(.sessionLoaded)`, then `try? await
+    authClient.refreshExpiredTokens()`. Both `try?`s stay, for the reason the
+    existing comment already gives: a first launch with no stored tokens throws
+    `AuthTokens.Error.missingToken`, and a transient network failure must not
+    block the app.
+  - Keep `isSessionLoaded` and the `ProgressView` branch — the gate still stops
+    a clone's login screen from flashing before the keychain restore lands — but
+    rewrite the `RootFeature` doc comment and the `.task` comment to say the
+    gate waits on the keychain read only and must never wait on the network.
+  - Add `public var isAuthenticated: Bool` to `RootFeature.State`: `true` for
+    `.valid` and `.expired`, `false` for `.missing` and `nil`, with a comment
+    explaining that `.expired` still carries a usable refresh token and the next
+    `sendAuthenticated` refreshes it silently, so treating it as signed out
+    would bounce a user to a login screen for a merely stale access token.
+  - Update the three existing tests: assertions about the post-refresh session
+    (`access == "fresh"`, `authSession == nil`, `access == "stale"`) now belong
+    after `await store.finish()`, because `.sessionLoaded` no longer implies the
+    refresh has run. Assert `isAuthenticated` alongside each one — `true` after
+    a successful refresh, `false` after a rejected one, `true` after a transient
+    failure, which is the case that pins the `.expired` rule.
+  - Add one test proving the gate no longer waits on the network: give `refresh`
+    a closure that suspends on a continuation the test owns, assert
+    `.sessionLoaded` arrives and `isSessionLoaded` is `true` while the refresh is
+    still suspended, then resume the continuation before `await store.finish()`
+    so the effect can complete.
+  - In `docs/api-clients.md`, rewrite the `loadSession()` bullet to describe the
+    two-step launch (restore, render, then refresh), change the readiness
+    sentence so it says the gate waits on the keychain restore rather than on
+    `refreshExpiredTokens()`, and point the `.expired` bullet at
+    `RootFeature.State.isAuthenticated` as the shipped example of the rule.
+- **Dependencies.** None. `isAuthenticated` reads the session through
+  `RootFeature.State`, so `RootFeatureTests` needs no `import Sharing` and this
+  item does not wait on item 2.
+- **Acceptance.** `.sessionLoaded` is sent before `refreshExpiredTokens()` is
+  awaited, and no code path gates rendering on the refresh; `isAuthenticated`
+  returns `true` for `.expired`; the new suspended-refresh test fails if the two
+  calls are put back in the old order; `docs/api-clients.md` no longer says
+  `loadSession()` runs "together with `refreshExpiredTokens()`".
+- **Validation.** `mise exec -- tuist generate --no-open`,
+  `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`.
 
 ### 2. Extend `usesSharing` to the generated test targets
 
 - [ ] **Gap.** `Project.framework(usesSharing:)` in
-      `Tuist/ProjectDescriptionHelpers/Project+Templates.swift:43-74` applies
+      `Tuist/ProjectDescriptionHelpers/Project+Templates.swift:36-86` builds
+      `baseSettings` at `:43-49` and applies
       `-module-alias Sharing=SwiftSharing` to the framework target only. The
-      `\(name)Tests` target it generates alongside is declared with no
-      `settings:` at all, so `import Sharing` in
+      `\(name)Tests` target it generates alongside (`:75-83`) is declared with
+      no `settings:` at all, so `import Sharing` in
       `Core/Tests/…` or `RootFeature/Tests/…` fails with an unresolved module
       even though the project passed `usesSharing: true`. The app target already
       had this fixed by hand (`App/Project.swift:38` and `:54` set the flag on
@@ -153,3 +159,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Bootstrap the stored auth session at the app root
 - [x] Give the `App` target the `Sharing` module alias
 - [x] Put the shared network session behind a `Core` dependency
+- [x] Correct the authentication section of `docs/api-clients.md`
