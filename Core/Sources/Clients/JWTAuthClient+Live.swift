@@ -56,6 +56,20 @@ extension JWTAuthClient: @retroactive DependencyKey {
   )
 }
 
+// MARK: - Readability alias
+
+/// Readability alias over the library's `jwtAuthClient` key — the transport
+/// the examples in `docs/api-clients.md` call `send` / `sendAuthenticated` on.
+/// Both keys address the same stored value: the alias has get and set, so
+/// an override through either one (for example `$0.apiClient.refresh = …` in
+/// a `withDependencies` block) is visible through the other.
+extension DependencyValues {
+  public var apiClient: JWTAuthClient {
+    get { jwtAuthClient }
+    set { jwtAuthClient = newValue }
+  }
+}
+
 // MARK: - Refresh endpoint models
 
 // Template request/response shapes for the token-refresh call. Rename fields to

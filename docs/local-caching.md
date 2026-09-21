@@ -388,17 +388,17 @@ public struct DataSyncClient: Sendable {
 extension DataSyncClient: DependencyKey {
   public static let liveValue = { () -> Self in
     @Dependency(\.defaultDatabase) var database
-    @Dependency(\.apiEndpointClient) var apiClient
+    @Dependency(\.myAPIClient) var myAPIClient
 
     return Self {
-      let fetchedNotes = try await apiClient.getNotes()
+      let fetchedNotes = try await myAPIClient.getNotes()
       try await database.write { db in
         for note in fetchedNotes {
           try Note.upsert { .init(note) }.execute(db)
         }
       }
     } syncNote: { id in
-      let note = try await apiClient.getNote(id)
+      let note = try await myAPIClient.getNote(id)
       try await database.write { db in
         try Note.upsert { .init(note) }.execute(db)
       }
