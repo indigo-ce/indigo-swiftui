@@ -5,9 +5,9 @@
 This guide covers how to build API clients that integrate with The Composable Architecture (TCA) using `HTTPRequestClient` and `HTTPRequestBuilder`. The patterns described here provide type-safe, testable, and composable networking.
 
 ```swift
-@Dependency(\.apiEndpointClient) var apiClient
+@Dependency(\.myAPIClient) var myAPIClient
 
-let stacks = try await apiClient.getStacks()
+let stacks = try await myAPIClient.getStacks()
 ```
 
 Key advantages:
@@ -78,7 +78,7 @@ For apps with a limited number of endpoints, a single client keeps things simple
 
 ```swift
 @DependencyClient
-public struct APIEndpointClient: Sendable {
+public struct MyAPIClient: Sendable {
   public var signIn: @Sendable (_ with: SignInPayload) async throws -> Token
   public var signOut: @Sendable (_ sessionId: String) async throws -> EmptyResponse
   public var getStacks: @Sendable () async throws -> [Stack]
@@ -301,15 +301,18 @@ private struct TokenResponse: Decodable {
 
 The refresh request is sent on `networkSession` from `@Dependency(\.networkSession)` — the single `URLSession` every client under `Core/Sources/Clients` shares, declared in `Core/Sources/Clients/NetworkSession.swift`.
 
-Create an alias for convenience:
+The library registers this transport as `jwtAuthClient`; `Core` also ships a readability alias for it in `Core/Sources/Clients/JWTAuthClient+Live.swift`, so `@Dependency(\.apiClient)` works out of the box:
 
 ```swift
 extension DependencyValues {
   public var apiClient: JWTAuthClient {
-    jwtAuthClient
+    get { jwtAuthClient }
+    set { jwtAuthClient = newValue }
   }
 }
 ```
+
+The alias is get/set on purpose: both keys address the same stored value, so an override through either one — for example `$0.apiClient.refresh = …` inside a `withDependencies` block in a test — is visible through the other.
 
 ### Session Lifecycle
 
@@ -475,7 +478,7 @@ do {
 ### Environment-Based Host
 
 ```swift
-extension APIEndpointClient {
+extension MyAPIClient {
   #if DEBUG
     public static let webHost = "http://localhost:4321"
   #else
@@ -511,14 +514,14 @@ public enum Configuration {
 ```swift
 @Reducer
 struct StacksFeature {
-  @Dependency(\.apiEndpointClient) var apiClient
+  @Dependency(\.myAPIClient) var myAPIClient
 
   var body: some ReducerOf<Self> {
     Reduce { state, action in
       switch action {
       case .loadStacks:
         return .run { send in
-          let stacks = try await apiClient.getStacks()
+          let stacks = try await myAPIClient.getStacks()
           await send(.stacksLoaded(stacks))
         }
       }
@@ -535,7 +538,7 @@ func loadStacks() async {
   let store = TestStore(initialState: StacksFeature.State()) {
     StacksFeature()
   } withDependencies: {
-    $0.apiEndpointClient.getStacks = { [.mock] }
+    $0.myAPIClient.getStacks = { [.mock] }
   }
 
   await store.send(.loadStacks)
@@ -572,7 +575,7 @@ import HTTPRequestBuilder
 import HTTPRequestClient
 
 @DependencyClient
-public struct APIEndpointClient: Sendable {
+public struct MyAPIClient: Sendable {
   public var signIn: @Sendable (_ with: SignInPayload) async throws -> Token
   public var getStacks: @Sendable () async throws -> [Stack]
   public var createStack: @Sendable (_ stack: CreateStack) async throws -> Stack
@@ -582,7 +585,7 @@ public enum APIClientError: Error {
   case invalidResponse
 }
 
-extension APIEndpointClient: DependencyKey {
+extension MyAPIClient: DependencyKey {
   #if DEBUG
     public static let webHost = "http://localhost:4321"
   #else
@@ -612,9 +615,9 @@ extension APIEndpointClient: DependencyKey {
 }
 
 extension DependencyValues {
-  public var apiEndpointClient: APIEndpointClient {
-    get { self[APIEndpointClient.self] }
-    set { self[APIEndpointClient.self] = newValue }
+  public var myAPIClient: MyAPIClient {
+    get { self[MyAPIClient.self] }
+    set { self[MyAPIClient.self] = newValue }
   }
 }
 ```

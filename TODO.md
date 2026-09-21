@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Ship the `apiClient` dependency alias the guide already assumes
 
-- [ ] **Gap.** `docs/api-clients.md` writes its examples against
+- [x] **Gap.** `docs/api-clients.md` writes its examples against
       `@Dependency(\.apiClient)` — the transport that `send` /
       `sendAuthenticated` are called on — at `:53`, `:149`, `:207`, and `:593`,
       including the canonical "Basic Structure" snippet at `:43-61` that the
