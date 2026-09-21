@@ -328,8 +328,10 @@ Tokens live in two layers, and the library keeps them in lockstep:
   `@Shared(.authSession)` directly from feature code.
 - `loadSession()` restores the keychain into memory on launch. It runs once
   per launch from `RootFeature`'s `.task` in
-  `RootFeature/Sources/RootView.swift`, together with
-  `refreshExpiredTokens()` — the shipped launch call site to copy.
+  `RootFeature/Sources/RootView.swift`, which lifts the launch gate (sends
+  `.sessionLoaded`) as soon as the restore lands and only then calls
+  `refreshExpiredTokens()` in the background — the shipped launch call site
+  to copy: restore, render, then refresh.
 - `refreshExpiredTokens()` refreshes only when the stored access token has
   already expired, judged by locally decoding the token's expiry — there is no
   failed-request probe. When the server rejects the refresh token, the
@@ -339,7 +341,8 @@ Tokens live in two layers, and the library keeps them in lockstep:
   `sendAuthenticated` is what throws `AuthTokens.Error.missingToken`.
 - `.expired` still holds a usable refresh token, so UI should treat it as
   signed in rather than falling back to a login screen; only `.missing` and
-  `nil` mean "no session".
+  `nil` mean "no session". `RootFeature.State.isAuthenticated` in
+  `RootFeature/Sources/RootView.swift` is the shipped example of this rule.
 
 ### Making Authenticated Requests
 

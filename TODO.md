@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Take the launch token refresh off the app's first frame
 
-- [ ] **Gap.** `RootFeature`'s `.task` in `RootFeature/Sources/RootView.swift`
+- [x] **Gap.** `RootFeature`'s `.task` in `RootFeature/Sources/RootView.swift`
       awaits `authClient.refreshExpiredTokens()` and only afterwards sends
       `.sessionLoaded`, which flips `isSessionLoaded` and lets `RootView` swap
       its `ProgressView` for `NotesListView`. That one call does two very
