@@ -7,77 +7,63 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Take the launch token refresh off the app's first frame
+### 1. Ship the `apiClient` dependency alias the guide already assumes
 
-- [x] **Gap.** `RootFeature`'s `.task` in `RootFeature/Sources/RootView.swift`
-      awaits `authClient.refreshExpiredTokens()` and only afterwards sends
-      `.sessionLoaded`, which flips `isSessionLoaded` and lets `RootView` swap
-      its `ProgressView` for `NotesListView`. That one call does two very
-      different things: `loadSession()`, a local keychain read, and — only when
-      the stored access token has already expired — a network round trip to
-      `api/v1/auth/refresh-access`. Gating the first frame on the second means a
-      cold launch with stored-but-expired tokens on a slow or unreachable
-      network holds the whole UI behind a spinner until that request times out,
-      even though everything `RootView` shows comes from the local database
-      (`NotesListFeature` → `notesClient` → `@Dependency(\.defaultDatabase)`)
-      and needs no session at all. `docs/api-clients.md` presents this shape as
-      "the shipped launch call site to copy", so every clone inherits it.
-      Second half of the same gap: `RootFeature.State` declares
-      `@Shared(.authSession) var authSession` and no code anywhere in the
-      template reads it. The rule the guide states in prose — `.expired` still
-      holds a usable refresh token, so it counts as signed in, and only
-      `.missing`/`nil` mean "no session" — has no expression in code, so a clone
-      writing its first auth-gated screen has nothing to copy and will reach for
-      `case .valid` alone.
-- **Desired behavior.** "Ready" means the persisted session has been restored
-  from the keychain — a local operation that cannot stall. The network refresh
-  settles afterwards in the background and republishes `@Shared(.authSession)`
-  when it lands. The signed-in test lives in one named place that tests pin.
-- **Scope.** `RootFeature/Sources/RootView.swift`,
-  `RootFeature/Tests/RootFeatureTests.swift`, and the "Session Lifecycle"
-  section of `docs/api-clients.md`. No other module changes; no new dependency,
-  action-level API for features, or UI beyond what is listed here.
-  - Split the `.task` effect into `try? await authClient.loadSession()`, then
-    `await send(.sessionLoaded)`, then `try? await
-    authClient.refreshExpiredTokens()`. Both `try?`s stay, for the reason the
-    existing comment already gives: a first launch with no stored tokens throws
-    `AuthTokens.Error.missingToken`, and a transient network failure must not
-    block the app.
-  - Keep `isSessionLoaded` and the `ProgressView` branch — the gate still stops
-    a clone's login screen from flashing before the keychain restore lands — but
-    rewrite the `RootFeature` doc comment and the `.task` comment to say the
-    gate waits on the keychain read only and must never wait on the network.
-  - Add `public var isAuthenticated: Bool` to `RootFeature.State`: `true` for
-    `.valid` and `.expired`, `false` for `.missing` and `nil`, with a comment
-    explaining that `.expired` still carries a usable refresh token and the next
-    `sendAuthenticated` refreshes it silently, so treating it as signed out
-    would bounce a user to a login screen for a merely stale access token.
-  - Update the three existing tests: assertions about the post-refresh session
-    (`access == "fresh"`, `authSession == nil`, `access == "stale"`) now belong
-    after `await store.finish()`, because `.sessionLoaded` no longer implies the
-    refresh has run. Assert `isAuthenticated` alongside each one — `true` after
-    a successful refresh, `false` after a rejected one, `true` after a transient
-    failure, which is the case that pins the `.expired` rule.
-  - Add one test proving the gate no longer waits on the network: give `refresh`
-    a closure that suspends on a continuation the test owns, assert
-    `.sessionLoaded` arrives and `isSessionLoaded` is `true` while the refresh is
-    still suspended, then resume the continuation before `await store.finish()`
-    so the effect can complete.
-  - In `docs/api-clients.md`, rewrite the `loadSession()` bullet to describe the
-    two-step launch (restore, render, then refresh), change the readiness
-    sentence so it says the gate waits on the keychain restore rather than on
-    `refreshExpiredTokens()`, and point the `.expired` bullet at
-    `RootFeature.State.isAuthenticated` as the shipped example of the rule.
-- **Dependencies.** None. `isAuthenticated` reads the session through
-  `RootFeature.State`, so `RootFeatureTests` needs no `import Sharing` and this
-  item does not wait on item 2.
-- **Acceptance.** `.sessionLoaded` is sent before `refreshExpiredTokens()` is
-  awaited, and no code path gates rendering on the refresh; `isAuthenticated`
-  returns `true` for `.expired`; the new suspended-refresh test fails if the two
-  calls are put back in the old order; `docs/api-clients.md` no longer says
-  `loadSession()` runs "together with `refreshExpiredTokens()`".
+- [ ] **Gap.** `docs/api-clients.md` writes its examples against
+      `@Dependency(\.apiClient)` — the transport that `send` /
+      `sendAuthenticated` are called on — at `:53`, `:149`, `:207`, and `:593`,
+      including the canonical "Basic Structure" snippet at `:43-61` that the
+      whole guide builds on. The template ships no such key: `rg -n 'apiClient'
+      Core/` returns nothing, and the only definition anywhere is a four-line
+      snippet at `:304-312` introduced with "Create an alias for convenience",
+      which the reader has to notice and hand-copy. Every example before and
+      after it fails to compile in a fresh clone until they backtrack. A second
+      invented name, `\.apiEndpointClient` (`:8`, `:514`, `:538`), stands for
+      the reader's *own* endpoint client — but the guide registers that client
+      as `myAPIClient` at `:63-68`, so the document contradicts itself about
+      what the reader just declared.
+- **Desired behavior.** Every dependency key a guide example uses either ships
+  in the template or is declared earlier in the same guide under the name the
+  example uses.
+- **Scope.** `Core/Sources/Clients/JWTAuthClient+Live.swift` and
+  `docs/api-clients.md`. Nothing else.
+  - Add to `JWTAuthClient+Live.swift`, below the `liveValue` extension:
+
+    ```swift
+    extension DependencyValues {
+      public var apiClient: JWTAuthClient {
+        get { jwtAuthClient }
+        set { jwtAuthClient = newValue }
+      }
+    }
+    ```
+
+    Give it get **and** set, not get-only. `RootFeatureTests.makeStore`
+    overrides the client with `$0.jwtAuthClient.refresh = …`; a read-only alias
+    would split reads (`\.apiClient`) from overrides (`\.jwtAuthClient`), which
+    is exactly the papercut the alias exists to remove. Add a doc comment
+    saying it is a readability alias over the library's `jwtAuthClient` and
+    that both keys address the same stored value.
+  - In `docs/api-clients.md`, replace the "Create an alias for convenience"
+    sentence and its snippet at `:304-312` with a statement that `Core` ships
+    the alias, naming `Core/Sources/Clients/JWTAuthClient+Live.swift`, and show
+    the shipped get/set form.
+  - Rename `\.apiEndpointClient` to `\.myAPIClient` at `:8`, `:514`, and `:538`
+    so those examples match the registration the guide already shows at
+    `:63-68`.
+  - Do not add a new `@DependencyClient` struct, do not touch `NotesClient`,
+    and do not rename `jwtAuthClient` anywhere — the alias is purely additive.
+- **Dependencies.** None.
+- **Acceptance.** `@Dependency(\.apiClient) var apiClient` compiles in any
+  target that imports `Core` and `JWTAuth`; `$0.apiClient.refresh = …`
+  compiles inside a `withDependencies` block and is visible through
+  `\.jwtAuthClient`; `rg -n 'apiEndpointClient' docs/` returns nothing; the
+  guide no longer tells the reader to create the alias themselves.
 - **Validation.** `mise exec -- tuist generate --no-open`,
-  `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`.
+  `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`. To pin
+  the get/set behavior, temporarily point `RootFeatureTests.makeStore` at
+  `$0.apiClient.refresh` instead of `$0.jwtAuthClient.refresh`, confirm the
+  suite still passes, and revert the override before committing.
 
 ### 2. Extend `usesSharing` to the generated test targets
 
@@ -160,3 +146,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Give the `App` target the `Sharing` module alias
 - [x] Put the shared network session behind a `Core` dependency
 - [x] Correct the authentication section of `docs/api-clients.md`
+- [x] Lift the launch gate before the background token refresh
