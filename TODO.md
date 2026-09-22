@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Extend `usesSharing` to the generated test targets
 
-- [ ] **Gap.** `Project.framework(usesSharing:)` in
+- [x] **Gap.** `Project.framework(usesSharing:)` in
       `Tuist/ProjectDescriptionHelpers/Project+Templates.swift:36-86` builds
       `baseSettings` at `:43-49` and applies
       `-module-alias Sharing=SwiftSharing` to the framework target only. The
