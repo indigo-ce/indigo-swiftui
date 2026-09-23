@@ -1,7 +1,12 @@
 import ComposableArchitecture
+import Core
 import JWTAuth
 import NotesListFeature
+import OSLog
+import SQLiteData
 import SwiftUI
+
+private let logger = Logger(subsystem: "Indigo", category: "RootFeature")
 
 // MARK: - Feature
 
@@ -16,6 +21,12 @@ public struct RootFeature: Sendable {
   @ObservableState
   public struct State: Equatable {
     @Shared(.authSession) public var authSession: AuthSession?
+
+    /// The `sub` claim of the last signed-in identity. `RootFeature` compares
+    /// every later session value against it so an ordinary token rotation is
+    /// not mistaken for an account switch (which wipes the user cache).
+    @Shared(.appStorage("lastSignedInUserId")) public var lastSignedInUserId: String?
+
     public var isSessionLoaded = false
     public var notesList = NotesListFeature.State()
 
@@ -40,10 +51,13 @@ public struct RootFeature: Sendable {
   public enum Action: Sendable {
     case task
     case sessionLoaded
+    case sessionChanged(AuthSession?)
+    case userCacheWiped
     case notesList(NotesListFeature.Action)
   }
 
   @Dependency(\.jwtAuthClient) var authClient
+  @Dependency(\.defaultDatabase) var database
 
   public init() {}
 
@@ -69,10 +83,70 @@ public struct RootFeature: Sendable {
 
       case .sessionLoaded:
         state.isSessionLoaded = true
-        return .none
+        // Record the identity the first time a valid session is seen, so a
+        // later session value has a baseline to compare against. A session
+        // that is `.expired` or missing still gets a baseline for free: the
+        // next `.valid` value counts as a fresh sign-in and is recorded when
+        // it arrives.
+        if state.lastSignedInUserId == nil,
+          case .valid(let tokens) = state.authSession
+        {
+          state.$lastSignedInUserId.withLock { $0 = tokens[string: "sub"] }
+        }
+        // Forward every later session value to `.sessionChanged`. The launch
+        // bootstrap already set the session before `.sessionLoaded`, so
+        // `.dropFirst()` skips that replay — without it every launch would
+        // look like a session change and wipe the cache before the user has
+        // done anything.
+        return .run { [authSession = state.$authSession] send in
+          for await session in authSession.publisher.values.dropFirst() {
+            await send(.sessionChanged(session))
+          }
+        }
+
+      case .sessionChanged(let session):
+        switch session {
+        case .valid(let tokens):
+          // Rotating an access token keeps the same identity — only a
+          // different `sub` (or an unreadable token, whose `sub` reads back
+          // `nil`) means the account actually changed.
+          let incomingUserId = tokens[string: "sub"]
+          guard state.lastSignedInUserId != incomingUserId
+          else { return .none }
+
+          state.$lastSignedInUserId.withLock { $0 = incomingUserId }
+          // The notes-list reset is deferred to `.userCacheWiped` so the new
+          // fetch cannot race the wipe and have its rows deleted out from
+          // under it.
+          return wipeUserCache()
+
+        case .missing, .expired, nil:
+          // A session that has gone away or is no longer valid must not
+          // leave one account's cached rows behind.
+          return wipeUserCache()
+        }
+
+      case .userCacheWiped:
+        // Reset *after* the delete completes: a refetch issued before the
+        // wipe would have its rows deleted underneath it.
+        state.notesList = NotesListFeature.State()
+        return .send(.notesList(.onAppear))
 
       case .notesList:
         return .none
+      }
+    }
+  }
+
+  private func wipeUserCache() -> Effect<Action> {
+    .run { [database] send in
+      do {
+        try await clearUserCache(database)
+        await send(.userCacheWiped)
+      } catch {
+        // A failed wipe must not crash the app; the stale rows are wiped on
+        // the next session change.
+        logger.error("Wipe user cache failed: \(error, privacy: .public)")
       }
     }
   }

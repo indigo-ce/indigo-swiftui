@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Wipe the user-scoped cache when the auth session changes
 
-- [ ] **Gap.** The template persists an auth session and a local SQLite cache and
+- [x] **Gap.** The template persists an auth session and a local SQLite cache and
       never connects them. `RootFeature` (`RootFeature/Sources/RootView.swift:18`)
       holds `@Shared(.authSession)` and reads it exactly once per launch: `.task`
       calls `loadSession()` / `refreshExpiredTokens()` (`:58-68`) and nothing ever
