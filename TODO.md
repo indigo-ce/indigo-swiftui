@@ -7,46 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Extend `usesSharing` to the generated test targets
-
-- [x] **Gap.** `Project.framework(usesSharing:)` in
-      `Tuist/ProjectDescriptionHelpers/Project+Templates.swift:36-86` builds
-      `baseSettings` at `:43-49` and applies
-      `-module-alias Sharing=SwiftSharing` to the framework target only. The
-      `\(name)Tests` target it generates alongside (`:75-83`) is declared with
-      no `settings:` at all, so `import Sharing` in
-      `Core/Tests/…` or `RootFeature/Tests/…` fails with an unresolved module
-      even though the project passed `usesSharing: true`. The app target already
-      had this fixed by hand (`App/Project.swift:38` and `:54` set the flag on
-      both the app and its test target), so the helper is now the only place
-      where the rule does not hold. `Core/Project.swift:8` and
-      `RootFeature/Project.swift:11` both pass `usesSharing: true`, so both have
-      a test bundle that cannot name the module its own sources depend on. This
-      bites first on auth work: a clone testing session state has to construct
-      `@Shared(.authSession)` in the test target, which needs the alias.
-- **Desired behavior.** `usesSharing: true` covers a project's framework target
-  and its test target, so a target that can use `Sharing` can also be tested
-  against it.
-- **Scope.** In `Project.framework`, build a second settings dictionary that
-  carries only `"OTHER_SWIFT_FLAGS": "$(inherited) -module-alias Sharing=SwiftSharing"`
-  when `usesSharing` is `true` (empty otherwise), and pass it as the
-  `\(name)Tests` target's `settings:`. Do not copy `DEFINES_MODULE` or
-  `SWIFT_VERSION` onto the test target — the flag is the whole change. Update
-  the `AGENTS.md` "Dependencies" paragraph (`:43`) so the rule reads that
-  `usesSharing: true` aliases the framework **and** its test bundle. Touch no
-  per-project `Project.swift`, `Package.swift`, or `App/Project.swift`.
-- **Dependencies.** None.
-- **Acceptance.** After generation, `CoreTests` and `RootFeatureTests` carry
-  `-module-alias Sharing=SwiftSharing` in `OTHER_SWIFT_FLAGS`, while
-  `ComponentsTests`, `NotesListFeatureTests`, and `NoteEditorFeatureTests`
-  (projects that do not pass `usesSharing`) do not.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `rg -n 'module-alias' Core/Core.xcodeproj/project.pbxproj` to confirm the test
-  target picked it up. Temporarily add `import Sharing` to
-  `Core/Tests/JSONCodersTests.swift`, run `mise exec -- tuist test AllTests`, and
-  revert the import before committing.
-
-### 2. Wipe the user-scoped cache when the auth session changes
+### 1. Wipe the user-scoped cache when the auth session changes
 
 - [ ] **Gap.** The template persists an auth session and a local SQLite cache and
       never connects them. `RootFeature` (`RootFeature/Sources/RootView.swift:18`)
@@ -65,7 +26,7 @@ do not rely on a simulator run.
   user-scoped table, and the composition root calls it whenever the signed-in
   identity changes or the session ends — with the feature state that was showing
   those rows reset in the same transition.
-- **Scope.** Three files plus tests.
+- **Scope.** Two source files plus tests.
   - New `Core/Sources/Database/UserCacheReset.swift`:
 
     ```swift
@@ -124,26 +85,41 @@ do not rely on a simulator run.
   - Do not add a sign-in or sign-out screen, do not add an API endpoint, and do
     not touch `NotesClient`, `NotesListFeature`, or `JWTAuthClient+Live.swift`.
     This item wires the seam; producing a session change is the clone's job.
-- **Dependencies.** Item 1. `RootFeatureTests` needs the `Sharing` module alias
-  to construct session values directly in the test bundle.
+- **Dependencies.** None. `usesSharing: true` already aliases `RootFeatureTests`
+  (`Tuist/ProjectDescriptionHelpers/Project+Templates.swift:48-52`), so the test
+  bundle can `import Sharing` and name `AuthSession` directly.
 - **Acceptance.** `clearUserCache` is public in `Core` and empties `notes`.
-  Driving `RootFeature` from `.valid(tokens(sub: "a"))` to
-  `.valid(tokens(sub: "b"))` deletes the rows, resets `notesList`, and refetches;
-  driving it to `.missing` does the same; a second `.valid` carrying the same
-  `sub` deletes nothing. A plain launch — `.task` through `.sessionLoaded` with no
+  Sending `.sessionChanged(.valid(tokens(sub: "b")))` with
+  `lastSignedInUserId == "a"` deletes the rows, resets `notesList`, and
+  refetches; `.sessionChanged(nil)` and `.sessionChanged(.missing)` do the same;
+  `.sessionChanged(.valid(tokens(sub: "a")))` with `lastSignedInUserId == "a"`
+  deletes nothing. A plain launch — `.task` through `.sessionLoaded` with no
   subsequent change — leaves existing rows intact.
 - **Validation.** `mise exec -- tuist generate --no-open`,
-  `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`. Add a
-  `Core/Tests/UserCacheResetTests.swift` suite that builds a database with
-  `withDependencies { $0.context = .test }` + `appDatabase()` (which already
-  gives each test its own temp file), inserts two notes, calls `clearUserCache`,
-  and asserts the table is empty. Add the `RootFeature` transitions above to
-  `RootFeatureTests`, reusing its `makeStore` keychain stubs. While you are in
-  `Core/Tests`, delete the `testTwoPlusTwoIsFour` placeholder suite in
-  `Core/Tests/CoreTests.swift` — the new suite replaces it and the four other
-  suites keep the target populated.
+  `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`.
+  - Add a `Core/Tests/UserCacheResetTests.swift` suite that builds a database
+    with `withDependencies { $0.defaultDatabase = try appDatabase() }` — under a
+    test context `appDatabase()` already hands each test its own temp file —
+    inserts two notes, calls `clearUserCache`, and asserts the table is empty.
+  - Test `RootFeature` by sending `.sessionChanged` directly and seeding
+    `lastSignedInUserId` on the initial state; do not try to drive the
+    `.dropFirst()` publisher from a `TestStore`. That effect only starts after
+    `.sessionLoaded`, and asserting on its timing tests `Sharing` rather than
+    this reducer. `$0.defaultAppStorage` resolves to a fresh in-memory suite per
+    test, so the seeded id does not leak between suites.
+  - Building a `.valid` fixture needs a parseable access token, not a signed
+    one: `AuthTokens[string: "sub"]` decodes the JWT without verifying it, so a
+    hand-assembled `header.payload.signature` string whose middle segment is
+    base64url-encoded `{"sub":"a"}` is enough. Note the existing `makeStore`
+    stub token `"stale"` is *not* decodable — reuse it and every `sub` reads
+    back `nil`, which makes the same-identity guard swallow every transition and
+    the tests pass for the wrong reason. Construct `.valid(_)` directly rather
+    than via `toSession()`, which inspects `exp`.
+  - While you are in `Core/Tests`, delete the `testTwoPlusTwoIsFour` placeholder
+    suite in `Core/Tests/CoreTests.swift` — the new suite replaces it and the
+    four other suites keep the target populated.
 
-### 3. Map the version build settings into the app's `Info.plist`
+### 2. Map the version build settings into the app's `Info.plist`
 
 - [ ] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
       `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
@@ -191,3 +167,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Correct the authentication section of `docs/api-clients.md`
 - [x] Lift the launch gate before the background token refresh
 - [x] Ship the `apiClient` dependency alias in `Core`
+- [x] Extend `usesSharing` to the generated test targets
