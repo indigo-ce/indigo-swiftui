@@ -32,7 +32,8 @@ extension Project {
   ///
   /// - Parameter usesSharing: Pass `true` from any target that imports `Sharing`.
   ///   The product ships aliased as `SwiftSharing`, so the flag applies
-  ///   `-module-alias Sharing=SwiftSharing` to the target.
+  ///   `-module-alias Sharing=SwiftSharing` to the framework target **and**
+  ///   its generated test bundle.
   public static func framework(
     name: String,
     reverseDomain: String = teamReverseDomain,
@@ -44,8 +45,10 @@ extension Project {
       "DEFINES_MODULE": "NO",
       "SWIFT_VERSION": "6.0"
     ]
+    var testSettings: SettingsDictionary = [:]
     if usesSharing {
       baseSettings["OTHER_SWIFT_FLAGS"] = "$(inherited) -module-alias Sharing=SwiftSharing"
+      testSettings["OTHER_SWIFT_FLAGS"] = "$(inherited) -module-alias Sharing=SwiftSharing"
     }
 
     return .init(
@@ -79,7 +82,10 @@ extension Project {
           bundleId: "\(reverseDomain).\(name)Tests",
           sources: ["Tests/**"],
           resources: ["Tests/Resources/**"],
-          dependencies: [.target(name: name)] + testDependencies
+          dependencies: [.target(name: name)] + testDependencies,
+          settings: .settings(
+            base: testSettings
+          )
         )
       ]
     )
