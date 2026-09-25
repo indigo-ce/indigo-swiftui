@@ -159,6 +159,10 @@ extension RootFeatureTests {
     store.exhaustivity = .off(showSkippedAssertions: false)
 
     await store.send(.sessionChanged(.valid(tokens(sub: "b"))))
+    // The durable marker must NOT move until the wipe it is guarded by has
+    // succeeded — otherwise an interrupted wipe leaves the old account's
+    // rows on disk under the new account's marker and nothing ever retries.
+    #expect(store.state.lastSignedInUserId == "a")
     await store.receive(\.userCacheWiped)
     await store.receive(\.notesList.onAppear)
     await store.receive(\.notesList.notesLoaded)
@@ -241,6 +245,133 @@ extension RootFeatureTests {
 
     let remaining = try await database.read { try Note.fetchAll($0) }
     #expect(remaining.count == 1)
+  }
+
+  /// A returning install restores `.expired` (its access token aged out),
+  /// not `.valid`. The marker must be seeded from the expired session too —
+  /// otherwise the routine refresh that follows publishes `.valid` for the
+  /// SAME user and the nil-vs-"a" comparison reads it as an account switch.
+  @Test func expiredRestoredSessionSeedsTheMarkerWithoutWiping() async throws {
+    let database = try appDatabase()
+    try await database.write { db in
+      try Note.insert { Note.Draft(Note(title: "Returning user's note")) }.execute(db)
+    }
+
+    let state = RootFeature.State()
+    state.authSession = .expired(tokens(sub: "a"))
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = database
+      $0.notesClient.fetchAll = { [] }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionLoaded)
+
+    #expect(store.state.lastSignedInUserId == "a")
+
+    let remaining = try await database.read { try Note.fetchAll($0) }
+    #expect(remaining.count == 1)
+
+    // The refresh then publishes `.valid` for the same user: no wipe.
+    await store.send(.sessionChanged(.valid(tokens(sub: "a"))))
+
+    let stillThere = try await database.read { try Note.fetchAll($0) }
+    #expect(stillThere.count == 1)
+  }
+
+  /// The process can die between persisting new credentials and committing
+  /// the marker, so the restored session can belong to a different account
+  /// than the marker claims. `.dropFirst()` would discard that session's
+  /// only emission — the reconcile at `.sessionLoaded` is the only chance to
+  /// catch the mismatch before the observer starts.
+  @Test func restoredSessionIsReconciledAgainstTheStaleMarker() async throws {
+    let database = try appDatabase()
+    try await database.write { db in
+      try Note.insert { Note.Draft(Note(title: "Account A's note")) }.execute(db)
+    }
+
+    let state = RootFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+    state.authSession = .valid(tokens(sub: "b"))
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = database
+      $0.notesClient.fetchAll = { [] }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionLoaded)
+    await store.receive(\.userCacheWiped)
+    await store.receive(\.notesList.onAppear)
+    await store.receive(\.notesList.notesLoaded)
+
+    let remaining = try await database.read { try Note.fetchAll($0) }
+    #expect(remaining.isEmpty)
+    #expect(store.state.lastSignedInUserId == "b")
+  }
+
+  /// A session that ended after the last launch (for example the wipe that
+  /// should have accompanied it failed or was interrupted) is reconciled the
+  /// same way: the launch itself finishes the teardown.
+  @Test func endedSessionIsReconciledAtLaunch() async throws {
+    let database = try appDatabase()
+    try await database.write { db in
+      try Note.insert { Note.Draft(Note(title: "Ended session's note")) }.execute(db)
+    }
+
+    let state = RootFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+    state.authSession = .missing
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = database
+      $0.notesClient.fetchAll = { [] }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionLoaded)
+    await store.receive(\.userCacheWiped)
+    await store.receive(\.notesList.onAppear)
+    await store.receive(\.notesList.notesLoaded)
+
+    let remaining = try await database.read { try Note.fetchAll($0) }
+    #expect(remaining.isEmpty)
+    #expect(store.state.lastSignedInUserId == nil)
+  }
+
+  /// A failed wipe hides the rows (the table may still hold the previous
+  /// account's data) but keeps the marker naming the old account, so the
+  /// next launch or session change retries the wipe.
+  @Test func wipeFailureKeepsTheMarkerAndHidesTheRows() async throws {
+    let database = try appDatabase()
+    try await database.write { db in
+      try Note.insert { Note.Draft(Note(title: "Undeletable note")) }.execute(db)
+    }
+    // A closed queue makes every write throw.
+    try database.close()
+
+    let state = RootFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = database
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionChanged(nil))
+    await store.receive(\.userCacheWipeFailed)
+
+    #expect(store.state.lastSignedInUserId == "a")
+    #expect(store.state.notesList.notes.isEmpty)
   }
 
   @Test func plainLaunchLeavesCachedRowsIntact() async throws {
