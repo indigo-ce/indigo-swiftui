@@ -80,7 +80,7 @@ For apps with a limited number of endpoints, a single client keeps things simple
 @DependencyClient
 public struct MyAPIClient: Sendable {
   public var signIn: @Sendable (_ with: SignInPayload) async throws -> Token
-  public var signOut: @Sendable (_ sessionId: String) async throws -> EmptyResponse
+  public var getProfile: @Sendable () async throws -> Profile
   public var getStacks: @Sendable () async throws -> [Stack]
   public var createStack: @Sendable (_ stack: CreateStack) async throws -> Stack
   public var getTiles: @Sendable (_ stackID: UUID) async throws -> [Tile]
@@ -107,7 +107,7 @@ For larger APIs, split clients by domain:
 @DependencyClient
 public struct AuthAPIClient: Sendable {
   public var signIn: @Sendable (_ payload: SignInPayload) async throws -> Token
-  public var signOut: @Sendable () async throws -> EmptyResponse
+  public var getProfile: @Sendable () async throws -> Profile
   public var refreshToken: @Sendable () async throws -> Token
 }
 
@@ -335,6 +335,19 @@ Tokens live in two layers, and the library keeps them in lockstep:
   `.sessionLoaded`) as soon as the restore lands and only then calls
   `refreshExpiredTokens()` in the background — the shipped launch call site
   to copy: restore, render, then refresh.
+- Sign-out goes through `@Dependency(\.sessionClient).signOut()` — never a
+  bare `authTokensClient.destroy()`. `signOut` first revokes the refresh token
+  on the server on a **best-effort** basis (`POST /api/v1/auth/revoke-access`
+  with `{"refreshToken": …}`; it answers `{"success": true}` even for an
+  unknown or already-revoked token, so a retry is always safe), then destroys
+  the local credentials. A revoke failure (offline, 5xx, timeout) is logged
+  and never keeps the user signed in; only a local `destroy()` failure
+  throws, because destroying the stored credentials is what actually ends the
+  session on this device. The revoke call uses `send`, not
+  `sendAuthenticated`: the route authenticates with the refresh token in the
+  body, and refreshing an expired access token first would rotate the very
+  token about to be revoked. See
+  `Core/Sources/Clients/SessionClient.swift`.
 - `refreshExpiredTokens()` refreshes only when the stored access token has
   already expired, judged by locally decoding the token's expiry — there is no
   failed-request probe. When the server rejects the refresh token, the

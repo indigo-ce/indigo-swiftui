@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Ship a sign-out seam that revokes the refresh token before ending the session
 
-- [ ] **Gap.** The template can restore, refresh, and react to a session ending
+- [x] **Gap.** The template can restore, refresh, and react to a session ending
       (`RootFeature/Sources/RootView.swift:126-148` wipes the user cache when
       `@Shared(.authSession)` goes `nil`), but nothing in the codebase ends one on
       purpose: `rg -n 'destroy\(|revoke|signOut' Core/ RootFeature/` finds no call
