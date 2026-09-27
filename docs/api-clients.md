@@ -348,6 +348,21 @@ Tokens live in two layers, and the library keeps them in lockstep:
   body, and refreshing an expired access token first would rotate the very
   token about to be revoked. See
   `Core/Sources/Clients/SessionClient.swift`.
+- Sign-out only stays correct if credential writes are serialized against
+  token refresh. `refreshExpiredTokens()` — and every `sendAuthenticated`
+  rotation — publishes whatever the `refresh` closure returns by calling
+  `authTokensClient.set`, unconditionally and from inside the library; if
+  that publish lands after `signOut`'s `destroy()`, the user is signed back
+  in with a refresh token sign-out never revoked. `IndigoApp.swift` therefore
+  installs the sign-out-aware client at launch:
+  `prepareDependencies { $0.authTokensClient = .gated }`. The gated client
+  routes every write through `Core/Sources/Clients/AuthSessionGate.swift`:
+  the `refresh` closure records the publish it is about to hand back, and at
+  save time the gate drops it once sign-out has begun or the refresh token
+  it started from is no longer the stored one. Keep `.gated` installed when
+  you add credential writers; a bare `authTokensClient.save`/`.destroy` (the
+  ungated live client) bypasses the coordination. See `AuthSessionGate` for
+  the full contract.
 - `refreshExpiredTokens()` refreshes only when the stored access token has
   already expired, judged by locally decoding the token's expiry — there is no
   failed-request probe. When the server rejects the refresh token, the
