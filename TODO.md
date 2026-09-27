@@ -7,117 +7,95 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Wipe the user-scoped cache when the auth session changes
+### 1. Ship a sign-out seam that revokes the refresh token before ending the session
 
-- [x] **Gap.** The template persists an auth session and a local SQLite cache and
-      never connects them. `RootFeature` (`RootFeature/Sources/RootView.swift:18`)
-      holds `@Shared(.authSession)` and reads it exactly once per launch: `.task`
-      calls `loadSession()` / `refreshExpiredTokens()` (`:58-68`) and nothing ever
-      observes the value again. Meanwhile `notes` — the only table
-      `Core/Sources/Database/Migrations.swift:3-16` creates — is per-user data
-      that outlives the session: the sole row deletion in the codebase is
-      `NotesClient.delete` for a single id (`Core/Sources/Clients/NotesClient.swift:45-49`),
-      so `rg -n 'clearUserCache|wipe' Core/ RootFeature/` returns nothing. A clone
-      that adds sign-in/sign-out therefore leaks one account's cached rows into
-      the next account's session, and `state.notesList.notes` keeps rendering rows
-      for a session that has already ended. There is also no single place to
-      register teardown for the next user-scoped table a clone adds.
-- **Desired behavior.** Core owns one documented function that clears every
-  user-scoped table, and the composition root calls it whenever the signed-in
-  identity changes or the session ends — with the feature state that was showing
-  those rows reset in the same transition.
-- **Scope.** Two source files plus tests.
-  - New `Core/Sources/Database/UserCacheReset.swift`:
-
-    ```swift
-    import Foundation
-    import SQLiteData
-
-    /// Clears every user-scoped cached table. Call when the signed-in user
-    /// changes or the session ends.
-    ///
-    /// When you add a user-scoped table, add its delete here — this is the one
-    /// place the app tears down per-account data.
-    public func clearUserCache(_ writer: any DatabaseWriter) async throws {
-      try await writer.write { db in
-        try Note.delete().execute(db)
-      }
-    }
-    ```
-
-    `SQLiteData` re-exports `DatabaseWriter`, which is how
-    `Core/Sources/Database/Connection.swift:9` already spells its return type —
-    do not add a `GRDB` import.
-  - In `RootFeature/Sources/RootView.swift`, add to `State` a
-    `@Shared(.appStorage("lastSignedInUserId")) public var lastSignedInUserId: String?`,
-    add `case sessionChanged(AuthSession?)` and `case userCacheWiped` to `Action`,
-    and add `@Dependency(\.defaultDatabase) var database`.
-  - In the `.sessionLoaded` case, alongside setting `isSessionLoaded = true`:
-    record the current identity if it is not yet known
-    (`if state.lastSignedInUserId == nil, case .valid(let tokens) = state.authSession`
-    then `state.$lastSignedInUserId.withLock { $0 = tokens[string: "sub"] }`), and
-    return a long-running effect that forwards later session values:
-
-    ```swift
-    .run { [authSession = state.$authSession] send in
-      for await session in authSession.publisher.values.dropFirst() {
-        await send(.sessionChanged(session))
-      }
-    }
-    ```
-
-    `.dropFirst()` is load-bearing: the publisher replays the current value, and
-    without it every launch would wipe the cache before the user has done
-    anything.
-  - `.sessionChanged(session)`: on `.valid(let tokens)`, compare
-    `tokens[string: "sub"]` against `state.lastSignedInUserId`, return `.none`
-    when they match (an ordinary token rotation must not wipe anything), and
-    otherwise store the new id and wipe. On `.missing` / `nil` / `.expired`,
-    wipe unconditionally — a session that has gone away or is no longer valid
-    must not leave cached rows behind. The wipe is an effect that calls
-    `clearUserCache(database)` and sends `.userCacheWiped`; log and swallow a
-    throw rather than crashing, matching how `.task` already tolerates failure.
-  - `.userCacheWiped`: `state.notesList = NotesListFeature.State()`, then
-    `return .send(.notesList(.onAppear))` so the list reloads from the now-empty
-    table instead of showing stale rows. Resetting the state *after* the delete
-    completes is the point — a refetch issued before the wipe would have its rows
-    deleted out from under it.
-  - Do not add a sign-in or sign-out screen, do not add an API endpoint, and do
-    not touch `NotesClient`, `NotesListFeature`, or `JWTAuthClient+Live.swift`.
-    This item wires the seam; producing a session change is the clone's job.
-- **Dependencies.** None. `usesSharing: true` already aliases `RootFeatureTests`
-  (`Tuist/ProjectDescriptionHelpers/Project+Templates.swift:48-52`), so the test
-  bundle can `import Sharing` and name `AuthSession` directly.
-- **Acceptance.** `clearUserCache` is public in `Core` and empties `notes`.
-  Sending `.sessionChanged(.valid(tokens(sub: "b")))` with
-  `lastSignedInUserId == "a"` deletes the rows, resets `notesList`, and
-  refetches; `.sessionChanged(nil)` and `.sessionChanged(.missing)` do the same;
-  `.sessionChanged(.valid(tokens(sub: "a")))` with `lastSignedInUserId == "a"`
-  deletes nothing. A plain launch — `.task` through `.sessionLoaded` with no
-  subsequent change — leaves existing rows intact.
-- **Validation.** `mise exec -- tuist generate --no-open`,
+- [ ] **Gap.** The template can restore, refresh, and react to a session ending
+      (`RootFeature/Sources/RootView.swift:126-148` wipes the user cache when
+      `@Shared(.authSession)` goes `nil`), but nothing in the codebase ends one on
+      purpose: `rg -n 'destroy\(|revoke|signOut' Core/ RootFeature/` finds no call
+      site, and `docs/api-clients.md:83,110` only shows `signOut` as a
+      hypothetical client field. A clone that adds a sign-out button has to work
+      out for itself that calling `authTokensClient.destroy()` alone leaves the
+      refresh token alive on the server — anyone who copied it off the device can
+      keep minting access tokens until it expires. The backend the
+      template targets exposes `POST /api/v1/auth/revoke-access` with body
+      `{"refreshToken": "…"}`. It returns `{"success": true}` with status 200,
+      including for an unknown or already-revoked token, so a retry is always
+      safe.
+- **Desired behavior.** Core ships one sign-out operation with a fixed order:
+  revoke the refresh token on the server **on a best-effort basis**, then destroy
+  local credentials. A revoke failure (offline, 5xx, timeout) is logged and must
+  never keep the user signed in. A local `destroy()` failure is the only thing
+  that throws, because only a successful destroy actually ends the session on
+  this device. The existing session observer in `RootFeature` then wipes the
+  user cache with no extra wiring.
+- **Scope.** One new source file, one new test file, and one doc update.
+  - New `Core/Sources/Clients/SessionClient.swift`: a `@DependencyClient public
+    struct SessionClient: Sendable` with a single
+    `public var signOut: @Sendable () async throws -> Void`, a `DependencyKey`
+    conformance, and a `DependencyValues.sessionClient` get/set accessor, laid
+    out like `Core/Sources/Clients/NotesClient.swift`. `testValue` is `Self()`,
+    so an un-overridden test call reports an issue. `previewValue` is a no-op.
+  - `liveValue.signOut` resolves `\.apiClient`, `\.authTokensClient`, and
+    `\.networkSession` inside the closure (the same way
+    `JWTAuthClient+Live.swift:23-24` does), so `withDependencies` overrides
+    apply at call time. It reads `@Shared(.authSession)`. When
+    `session?.tokens?.refresh` is present, it sends
+    `apiClient.send(decoder: .api, urlSession: networkSession)` with
+    `Path("api", "v1", "auth", "revoke-access")` and
+    `post(RevokeRequest(refreshToken: refresh), encoder: .api)`, decoding a
+    private `struct RevokeResponse: Decodable { let success: Bool }`.
+    - Use `send`, not `sendAuthenticated`. The route authenticates with the
+      refresh token in the body, and `sendAuthenticated` would first try to
+      refresh an expired access token. That rotates the very token about to be
+      revoked and fails outright when offline.
+    - Wrap the request in `do/catch` and log any error with
+      `Logger(subsystem: "Indigo", category: "SessionClient")`, as
+      `RootView.swift:9` does. Then call `try await authTokensClient.destroy()`
+      unconditionally, including when there was no session.
+    - Keep `RevokeRequest` and `RevokeResponse` private to the file, as the
+      refresh models are in `JWTAuthClient+Live.swift:78-85`.
+  - `docs/api-clients.md`, section *Session Lifecycle*:
+    - Add a bullet saying sign-out goes through
+      `@Dependency(\.sessionClient).signOut()`, never a bare
+      `authTokensClient.destroy()`, and why: server revocation comes first and
+      is best effort, and local destroy must succeed.
+    - Replace the placeholder `signOut` field in the two client-organization
+      snippets (`:83`, `:110`) with a field that does not suggest a second
+      sign-out path, e.g. `getProfile`.
+  - Do not add a sign-in or sign-out screen, a sign-in endpoint, or any
+    `RootFeature` change. The existing `.sessionChanged` path already handles
+    the resulting `nil` session.
+- **Dependencies.** None. `Core` already declares `usesSharing: true`
+  (`Core/Project.swift:8`), so `@Shared(.authSession)` compiles in both the
+  target and its tests.
+- **Acceptance.**
+  - `sessionClient` is a public dependency in `Core`.
+  - With a stored session, `signOut()` issues exactly one `POST` to
+    `/api/v1/auth/revoke-access` whose JSON body carries the stored refresh
+    token, then leaves `@Shared(.authSession)` `nil` and the keychain entries
+    deleted.
+  - A 500 or a transport error from the revoke still ends with the session
+    destroyed and `signOut()` not throwing.
+  - With no stored session, no request is sent and `destroy()` still runs.
+  - When `keychainClient.delete` throws, `signOut()` rethrows.
+- **Validation.** Run `mise exec -- tuist generate --no-open`, then
   `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`.
-  - Add a `Core/Tests/UserCacheResetTests.swift` suite that builds a database
-    with `withDependencies { $0.defaultDatabase = try appDatabase() }` — under a
-    test context `appDatabase()` already hands each test its own temp file —
-    inserts two notes, calls `clearUserCache`, and asserts the table is empty.
-  - Test `RootFeature` by sending `.sessionChanged` directly and seeding
-    `lastSignedInUserId` on the initial state; do not try to drive the
-    `.dropFirst()` publisher from a `TestStore`. That effect only starts after
-    `.sessionLoaded`, and asserting on its timing tests `Sharing` rather than
-    this reducer. `$0.defaultAppStorage` resolves to a fresh in-memory suite per
-    test, so the seeded id does not leak between suites.
-  - Building a `.valid` fixture needs a parseable access token, not a signed
-    one: `AuthTokens[string: "sub"]` decodes the JWT without verifying it, so a
-    hand-assembled `header.payload.signature` string whose middle segment is
-    base64url-encoded `{"sub":"a"}` is enough. Note the existing `makeStore`
-    stub token `"stale"` is *not* decodable — reuse it and every `sub` reads
-    back `nil`, which makes the same-identity guard swallow every transition and
-    the tests pass for the wrong reason. Construct `.valid(_)` directly rather
-    than via `toSession()`, which inspects `exp`.
-  - While you are in `Core/Tests`, delete the `testTwoPlusTwoIsFour` placeholder
-    suite in `Core/Tests/CoreTests.swift` — the new suite replaces it and the
-    four other suites keep the target populated.
+  - Add a `@Suite(.serialized)` `Core/Tests/SessionClientTests.swift`. Give it
+    its own private `URLProtocol` stub scoped to `JWTAuthClient.host`, modeled
+    on `Core/Tests/JWTAuthClientLiveTests.swift:14-49`. The existing stub is
+    `private`. The new one must also record each request's path and body (read
+    `httpBodyStream` when `httpBody` is `nil`).
+  - Drive the real `SessionClient.liveValue.signOut` inside
+    `withDependencies`:
+    - `$0.httpRequestClient = .liveValue`
+    - `$0.jwtAuthClient = .liveValue`, which supplies `baseURL`
+    - `$0.authTokensClient = .liveValue`
+    - `$0.networkSession` set to an ephemeral session with the stub installed
+    - `$0.keychainClient` stubbed to record deletes, as
+      `RootFeature/Tests/RootFeatureTests.swift:27-29` does
+  - Seed the session with `authTokensClient.save(AuthTokens(access: "a",
+    refresh: "r"))` inside the same block, not by assigning `@Shared`.
 
 ### 2. Map the version build settings into the app's `Info.plist`
 
@@ -168,3 +146,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Lift the launch gate before the background token refresh
 - [x] Ship the `apiClient` dependency alias in `Core`
 - [x] Extend `usesSharing` to the generated test targets
+- [x] Wipe the user-scoped cache when the auth session changes
