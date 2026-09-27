@@ -84,12 +84,10 @@ private final class RevokeStubProtocol: URLProtocol {
 }
 
 @Suite(.serialized) struct SessionClientTests {
-  private func revokeBody(status: Int, body: Data, transportError: (any Error)? = nil) {
-    RevokeStubProtocol.stub = RevokeStubProtocol.Stub(
-      statusCode: status, body: body, transportError: transportError
-    )
-    RevokeStubProtocol.requests = []
-  }
+  private static let successStub = RevokeStubProtocol.Stub(
+    statusCode: 200,
+    body: Data(#"{"success":true}"#.utf8)
+  )
 
   private func stubbedSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
@@ -97,20 +95,26 @@ private final class RevokeStubProtocol: URLProtocol {
     return URLSession(configuration: configuration)
   }
 
-  /// Seeds the session when asked, drives the real
-  /// `SessionClient.liveValue.signOut`, and returns the keychain deletions it
-  /// performed.
+  /// Resets the stub to the given response and clears the recordings, seeds
+  /// the session when asked, drives the real `SessionClient.liveValue.signOut`,
+  /// and returns the keychain deletions it performed. Resetting on every call
+  /// keeps the serialized suite order-independent.
   private func signOut(
     seedTokens: Bool = true,
+    revokeStub: RevokeStubProtocol.Stub = Self.successStub,
     keychainDelete: (@Sendable (KeychainClient.Keys) async throws -> Void)? = nil
   ) async throws -> [KeychainClient.Keys] {
+    RevokeStubProtocol.stub = revokeStub
+    RevokeStubProtocol.requests = []
     let deletes = LockIsolated<[KeychainClient.Keys]>([])
     try await withDependencies {
       // The live pipeline is the subject under test; only the transport and
-      // the keychain are stubbed.
+      // the keychain are stubbed. `signOut` coordinates with token refresh
+      // through the gate, so the gated credential client is the one installed.
       $0.httpRequestClient = .liveValue
       $0.jwtAuthClient = .liveValue
-      $0.authTokensClient = .liveValue
+      $0.authTokensClient = .gated
+      $0.authSessionGate = AuthSessionGate()
       $0.networkSession = stubbedSession()
       $0.keychainClient.save = { _, _ in }
       $0.keychainClient.load = { _ in nil }
@@ -141,11 +145,9 @@ private final class RevokeStubProtocol: URLProtocol {
   }
 
   @Test func revoke500StillDestroysTheSessionWithoutThrowing() async throws {
-    revokeBody(
-      status: 500,
-      body: Data("boom".utf8)
+    let deletes = try await signOut(
+      revokeStub: RevokeStubProtocol.Stub(statusCode: 500, body: Data("boom".utf8))
     )
-    let deletes = try await signOut()
 
     #expect(RevokeStubProtocol.requests.count == 1)
     #expect(deletes == [.accessToken, .refreshToken])
@@ -154,8 +156,13 @@ private final class RevokeStubProtocol: URLProtocol {
   }
 
   @Test func revokeTransportFailureStillDestroysTheSessionWithoutThrowing() async throws {
-    revokeBody(status: 200, body: Data(), transportError: URLError(.notConnectedToInternet))
-    let deletes = try await signOut()
+    let deletes = try await signOut(
+      revokeStub: RevokeStubProtocol.Stub(
+        statusCode: 200,
+        body: Data(),
+        transportError: URLError(.notConnectedToInternet)
+      )
+    )
 
     #expect(RevokeStubProtocol.requests.isEmpty)
     #expect(deletes == [.accessToken, .refreshToken])
@@ -177,8 +184,11 @@ private final class RevokeStubProtocol: URLProtocol {
     try await withDependencies {
       $0.httpRequestClient = .liveValue
       $0.jwtAuthClient = .liveValue
-      $0.authTokensClient = .liveValue
+      $0.authTokensClient = .gated
+      $0.authSessionGate = AuthSessionGate()
       $0.networkSession = stubbedSession()
+      RevokeStubProtocol.stub = Self.successStub
+      RevokeStubProtocol.requests = []
       $0.keychainClient.save = { _, _ in }
       $0.keychainClient.load = { _ in nil }
       $0.keychainClient.delete = { _ in }
@@ -190,8 +200,11 @@ private final class RevokeStubProtocol: URLProtocol {
       try await withDependencies {
         $0.httpRequestClient = .liveValue
         $0.jwtAuthClient = .liveValue
-        $0.authTokensClient = .liveValue
+        $0.authTokensClient = .gated
+        $0.authSessionGate = AuthSessionGate()
         $0.networkSession = stubbedSession()
+        RevokeStubProtocol.stub = Self.successStub
+        RevokeStubProtocol.requests = []
         $0.keychainClient.save = { _, _ in }
         $0.keychainClient.load = { _ in nil }
         $0.keychainClient.delete = { _ in throw URLError(.badURL) }
@@ -201,6 +214,42 @@ private final class RevokeStubProtocol: URLProtocol {
       Issue.record("Expected the destroy failure to propagate, but signOut succeeded")
     } catch {
       // Expected: the destroy failure is the one thing that throws.
+    }
+  }
+
+  /// A refresh whose network call returned while sign-out was running hands
+  /// its rotated pair to the library, which publishes it unconditionally. The
+  /// gated credential client must veto that publish: its source refresh token
+  /// no longer exists.
+  @Test func signOutVetoesARefreshPublishThatCompletesAfterwards() async throws {
+    try await withDependencies {
+      $0.httpRequestClient = .liveValue
+      $0.jwtAuthClient = .liveValue
+      $0.authTokensClient = .gated
+      $0.authSessionGate = AuthSessionGate()
+      $0.networkSession = stubbedSession()
+      RevokeStubProtocol.stub = Self.successStub
+      RevokeStubProtocol.requests = []
+      $0.keychainClient.save = { _, _ in }
+      $0.keychainClient.load = { _ in nil }
+      $0.keychainClient.delete = { _ in }
+    } operation: {
+      try await AuthTokensClient.liveValue.save(AuthTokens(access: "a", refresh: "r"))
+
+      // As if the refresh had returned from the network: the publish the
+      // library is about to perform is staged, then `signOut` runs to
+      // completion, then the library's publish lands.
+      @Dependency(\.authSessionGate) var gate
+      await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+
+      try await SessionClient.liveValue.signOut()
+
+      @Dependency(\.authTokensClient) var authTokensClient
+      try await authTokensClient.save(AuthTokens(access: "a2", refresh: "r2"))
+
+      @Shared(.authSession) var session: AuthSession?
+      #expect(session == nil)
+      #expect(RevokeStubProtocol.requests.count == 1)
     }
   }
 }

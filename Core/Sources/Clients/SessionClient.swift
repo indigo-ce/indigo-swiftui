@@ -37,7 +37,15 @@ extension SessionClient: DependencyKey {
       @Dependency(\.apiClient) var apiClient
       @Dependency(\.authTokensClient) var authTokensClient
       @Dependency(\.networkSession) var networkSession
+      @Dependency(\.authSessionGate) var gate
       @Shared(.authSession) var session: AuthSession?
+
+      // Open the sign-out window before touching the network: from here until
+      // `destroy` settles, the gated `authTokensClient` (`.gated`, installed
+      // in `App`) refuses every credential publish, so a token refresh that
+      // completes mid-sign-out cannot resurrect the session being destroyed.
+      // See `AuthSessionGate`.
+      await gate.beginSignOut()
 
       if let refresh = session?.tokens?.refresh {
         // The route authenticates with the refresh token in the body, so this

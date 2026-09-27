@@ -21,6 +21,10 @@ struct IndigoApp: App {
   init() {
     prepareDependencies {
       $0.defaultDatabase = try! appDatabase()
+      // Serialize credential writes against sign-out: a token refresh that
+      // completes while `SessionClient.signOut` is running must not publish
+      // the session being destroyed. See `AuthSessionGate` in Core.
+      $0.authTokensClient = .gated
     }
   }
 
