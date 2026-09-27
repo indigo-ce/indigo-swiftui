@@ -159,10 +159,12 @@ extension RootFeatureTests {
     store.exhaustivity = .off(showSkippedAssertions: false)
 
     await store.send(.sessionChanged(.valid(tokens(sub: "b"))))
-    // The durable marker must NOT move until the wipe it is guarded by has
-    // succeeded — otherwise an interrupted wipe leaves the old account's
-    // rows on disk under the new account's marker and nothing ever retries.
-    #expect(store.state.lastSignedInUserId == "a")
+    // NB: the reducer commits the marker only inside `.userCacheWiped`, so
+    // there is no racy "marker is still the old value" assertion here — the
+    // effect can deliver the completion before an intervening expectation
+    // runs. The commit timing is pinned deterministically by
+    // `wipeFailureKeepsTheMarkerAndHidesTheRows` (a failed wipe must leave
+    // the marker alone).
     await store.receive(\.userCacheWiped)
     await store.receive(\.notesList.onAppear)
     await store.receive(\.notesList.notesLoaded)
