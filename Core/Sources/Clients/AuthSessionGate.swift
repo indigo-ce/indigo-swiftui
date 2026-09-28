@@ -22,7 +22,9 @@ import Sharing
 /// - A save that completes a staged refresh is written only while the refresh
 ///   token it started from is still the stored one and sign-out has not
 ///   begun. Otherwise it is dropped: the session it would republish is being
-///   destroyed. The decision happens at save time — sign-out may destroy the
+///   destroyed. The server has already issued the dropped refresh token, so
+///   the gated client revokes it best effort — otherwise it would stay live
+///   server-side with no copy left on the device to revoke later. The decision happens at save time — sign-out may destroy the
 ///   stored credentials between staging and saving, and only the save-time
 ///   check sees the final state.
 /// - A destroy runs to completion before any other write, and ends the
@@ -70,10 +72,13 @@ actor AuthSessionGate: DependencyKey {
   /// completing a staged refresh is dropped once sign-out has begun or its
   /// source refresh token is no longer the stored one; any other save is a
   /// fresh sign-in and re-arms publication.
+  ///
+  /// - Returns: `false` when the save was dropped.
+  @discardableResult
   func publish(
     _ tokens: AuthTokens,
     persist: @Sendable () async throws -> Void
-  ) async throws {
+  ) async throws -> Bool {
     await acquire()
     do {
       if let source = stagedSources.removeValue(forKey: tokens.refresh) {
@@ -81,7 +86,7 @@ actor AuthSessionGate: DependencyKey {
         let sourceIsCurrent = session?.tokens?.refresh == source
         if isSignOutInProgress || !sourceIsCurrent {
           release()
-          return
+          return false
         }
       } else {
         // A save that completes no staged refresh is a fresh sign-in.
@@ -89,6 +94,7 @@ actor AuthSessionGate: DependencyKey {
       }
       try await persist()
       release()
+      return true
     } catch {
       release()
       throw error
@@ -152,12 +158,23 @@ extension AuthTokensClient {
   /// Without it, `refreshExpiredTokens()`'s unconditional publish can land
   /// after `SessionClient.signOut`'s destroy and sign the user back in.
   public static var gated: AuthTokensClient {
-    let live = AuthTokensClient.liveValue
-    return Self(
+    gated(live: .liveValue, revoke: revokeRefreshToken)
+  }
+
+  /// `revoke` runs outside the gate's lock for every refresh token the gate
+  /// drops, so a slow revoke never stalls sign-out's destroy.
+  static func gated(
+    live: AuthTokensClient,
+    revoke: @escaping @Sendable (String) async -> Void
+  ) -> AuthTokensClient {
+    Self(
       save: { tokens in
         @Dependency(\.authSessionGate) var gate
-        try await gate.publish(tokens) {
+        let published = try await gate.publish(tokens) {
           try await live.save(tokens)
+        }
+        if !published {
+          await revoke(tokens.refresh)
         }
       },
       destroy: {

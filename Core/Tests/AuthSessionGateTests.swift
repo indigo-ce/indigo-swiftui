@@ -115,4 +115,33 @@ struct AuthSessionGateTests {
     #expect(recorder.writes.value.count == 2)
     #expect(Self.storedRefresh() == "r2")
   }
+
+  @Test func theGatedClientRevokesADroppedRefreshToken() async throws {
+    Self.seed(AuthTokens(access: "a", refresh: "r"))
+    let gate = AuthSessionGate()
+    let saved = LockIsolated<[AuthTokens]>([])
+    let revoked = LockIsolated<[String]>([])
+    let client = withDependencies {
+      $0.authSessionGate = gate
+    } operation: {
+      AuthTokensClient.gated(
+        live: AuthTokensClient(
+          save: { tokens in saved.withValue { $0.append(tokens) } },
+          destroy: {}
+        ),
+        revoke: { refresh in revoked.withValue { $0.append(refresh) } }
+      )
+    }
+
+    await gate.beginSignOut()
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    try await withDependencies {
+      $0.authSessionGate = gate
+    } operation: {
+      try await client.save(AuthTokens(access: "a2", refresh: "r2"))
+    }
+
+    #expect(saved.value.isEmpty)
+    #expect(revoked.value == ["r2"])
+  }
 }

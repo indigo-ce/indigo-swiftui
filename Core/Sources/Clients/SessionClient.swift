@@ -34,9 +34,7 @@ extension SessionClient: DependencyKey {
   // at call time.
   public static let liveValue: SessionClient = Self(
     signOut: {
-      @Dependency(\.apiClient) var apiClient
       @Dependency(\.authTokensClient) var authTokensClient
-      @Dependency(\.networkSession) var networkSession
       @Dependency(\.authSessionGate) var gate
       @Shared(.authSession) var session: AuthSession?
 
@@ -48,24 +46,7 @@ extension SessionClient: DependencyKey {
       await gate.beginSignOut()
 
       if let refresh = session?.tokens?.refresh {
-        // The route authenticates with the refresh token in the body, so this
-        // is `send`, not `sendAuthenticated`: refreshing an already-expired
-        // access token first would rotate the very token about to be revoked,
-        // and fail outright when offline.
-        do {
-          let _: RevokeResponse = try await apiClient.send(
-            decoder: .api,
-            urlSession: networkSession
-          ) {
-            Path("api", "v1", "auth", "revoke-access")
-            post(RevokeRequest(refreshToken: refresh), encoder: .api)
-          }.value
-        } catch {
-          // Best effort: the server may still hold a live refresh token, but
-          // the local destroy below is what ends the session on this device,
-          // so the failure must not block sign-out.
-          logger.error("Refresh-token revoke failed: \(error, privacy: .public)")
-        }
+        await revokeRefreshToken(refresh)
       }
 
       try await authTokensClient.destroy()
@@ -85,6 +66,34 @@ extension DependencyValues {
   public var sessionClient: SessionClient {
     get { self[SessionClient.self] }
     set { self[SessionClient.self] = newValue }
+  }
+}
+
+// MARK: - Revoke
+
+/// Revokes `refresh` on the server, best effort: a failure is logged and
+/// swallowed. Shared by `signOut` and the gated `AuthTokensClient`, which
+/// revokes refresh tokens it refuses to store.
+func revokeRefreshToken(_ refresh: String) async {
+  @Dependency(\.apiClient) var apiClient
+  @Dependency(\.networkSession) var networkSession
+
+  // The route authenticates with the refresh token in the body, so this is
+  // `send`, not `sendAuthenticated`: refreshing an already-expired access
+  // token first would rotate the very token about to be revoked, and fail
+  // outright when offline.
+  do {
+    let _: RevokeResponse = try await apiClient.send(
+      decoder: .api,
+      urlSession: networkSession
+    ) {
+      Path("api", "v1", "auth", "revoke-access")
+      post(RevokeRequest(refreshToken: refresh), encoder: .api)
+    }.value
+  } catch {
+    // Best effort: the server may still hold a live refresh token, but
+    // callers must not be blocked by an unreachable revoke endpoint.
+    logger.error("Refresh-token revoke failed: \(error, privacy: .public)")
   }
 }
 

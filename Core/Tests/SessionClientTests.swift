@@ -219,8 +219,8 @@ private final class RevokeStubProtocol: URLProtocol {
 
   /// A refresh whose network call returned while sign-out was running hands
   /// its rotated pair to the library, which publishes it unconditionally. The
-  /// gated credential client must veto that publish: its source refresh token
-  /// no longer exists.
+  /// gated credential client must veto that publish — its source refresh token
+  /// no longer exists — and revoke the rotated refresh token it drops.
   @Test func signOutVetoesARefreshPublishThatCompletesAfterwards() async throws {
     try await withDependencies {
       $0.httpRequestClient = .liveValue
@@ -249,7 +249,10 @@ private final class RevokeStubProtocol: URLProtocol {
 
       @Shared(.authSession) var session: AuthSession?
       #expect(session == nil)
-      #expect(RevokeStubProtocol.requests.count == 1)
+      let revoked = RevokeStubProtocol.requests.map { String(decoding: $0.body, as: UTF8.self) }
+      #expect(revoked.count == 2)
+      #expect(revoked.first?.contains(#""refreshToken":"r""#) == true)
+      #expect(revoked.last?.contains(#""refreshToken":"r2""#) == true)
     }
   }
 }
