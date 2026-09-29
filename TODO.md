@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Let the sandboxed macOS app open outgoing network connections
 
-- [ ] **Gap.** The app builds for the Mac: `Destinations.destinations` is
+- [x] **Gap.** The app builds for the Mac: `Destinations.destinations` is
       `[.iPad, .iPhone, .mac]`
       (`Tuist/ProjectDescriptionHelpers/Project+Templates.swift:107-111`), and
       `App/Project.swift:35` signs the `macosx` SDK with `mac.entitlements`.
