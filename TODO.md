@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Ship a sign-out seam that revokes the refresh token before ending the session
 
-- [ ] **Gap.** The template can restore, refresh, and react to a session ending
+- [x] **Gap.** The template can restore, refresh, and react to a session ending
       (`RootFeature/Sources/RootView.swift:126-148` wipes the user cache when
       `@Shared(.authSession)` goes `nil`), but nothing in the codebase ends one on
       purpose: `rg -n 'destroy\(|revoke|signOut' Core/ RootFeature/` finds no call
@@ -29,7 +29,9 @@ do not rely on a simulator run.
   that throws, because only a successful destroy actually ends the session on
   this device. The existing session observer in `RootFeature` then wipes the
   user cache with no extra wiring.
-- **Scope.** One new source file, one new test file, and one doc update.
+- **Scope.** The sign-out client, the `AuthSessionGate` that keeps its destroy
+  serialized against token refresh, their test files, a
+  `prepareDependencies` line in `App`, and one doc update.
   - New `Core/Sources/Clients/SessionClient.swift`: a `@DependencyClient public
     struct SessionClient: Sendable` with a single
     `public var signOut: @Sendable () async throws -> Void`, a `DependencyKey`
@@ -79,6 +81,11 @@ do not rely on a simulator run.
     destroyed and `signOut()` not throwing.
   - With no stored session, no request is sent and `destroy()` still runs.
   - When `keychainClient.delete` throws, `signOut()` rethrows.
+  - A token refresh that completes while `signOut()` is in flight cannot
+    republish credentials: `IndigoApp` installs
+    `$0.authTokensClient = .gated`, whose writes serialize through
+    `AuthSessionGate`; a staged refresh publish is dropped once sign-out has
+    begun or its source refresh token is no longer the stored one.
 - **Validation.** Run `mise exec -- tuist generate --no-open`, then
   `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`.
   - Add a `@Suite(.serialized)` `Core/Tests/SessionClientTests.swift`. Give it

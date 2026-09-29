@@ -22,6 +22,7 @@ extension JWTAuthClient: @retroactive DependencyKey {
     refresh: { tokens in
       @Dependency(\.httpRequestClient) var httpClient
       @Dependency(\.networkSession) var networkSession
+      @Dependency(\.authSessionGate) var gate
 
       do {
         let response: SuccessResponse<TokenResponse> = try await httpClient.send(
@@ -32,10 +33,15 @@ extension JWTAuthClient: @retroactive DependencyKey {
           Path("api", "v1", "auth", "refresh-access")
           post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
         }
-        return AuthTokens(
+        let newTokens = AuthTokens(
           access: response.value.accessToken,
           refresh: response.value.refreshToken
         )
+        // Record the publish the library is about to perform with these
+        // tokens, so a concurrent sign-out can veto it at save time — see
+        // `AuthSessionGate`.
+        await gate.stagePublish(newRefresh: newTokens.refresh, sourceRefresh: tokens.refresh)
+        return newTokens
       } catch let error as HTTPRequestClient.Error {
         // THE CONTRACT: only a definitive server rejection destroys the
         // session. A 401 from /api/v1/auth/refresh-access means the refresh
