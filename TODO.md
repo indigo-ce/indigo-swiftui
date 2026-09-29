@@ -7,104 +7,134 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Ship a sign-out seam that revokes the refresh token before ending the session
+### 1. Let the sandboxed macOS app open outgoing network connections
 
-- [x] **Gap.** The template can restore, refresh, and react to a session ending
-      (`RootFeature/Sources/RootView.swift:126-148` wipes the user cache when
-      `@Shared(.authSession)` goes `nil`), but nothing in the codebase ends one on
-      purpose: `rg -n 'destroy\(|revoke|signOut' Core/ RootFeature/` finds no call
-      site, and `docs/api-clients.md:83,110` only shows `signOut` as a
-      hypothetical client field. A clone that adds a sign-out button has to work
-      out for itself that calling `authTokensClient.destroy()` alone leaves the
-      refresh token alive on the server — anyone who copied it off the device can
-      keep minting access tokens until it expires. The backend the
-      template targets exposes `POST /api/v1/auth/revoke-access` with body
-      `{"refreshToken": "…"}`. It returns `{"success": true}` with status 200,
-      including for an unknown or already-revoked token, so a retry is always
-      safe.
-- **Desired behavior.** Core ships one sign-out operation with a fixed order:
-  revoke the refresh token on the server **on a best-effort basis**, then destroy
-  local credentials. A revoke failure (offline, 5xx, timeout) is logged and must
-  never keep the user signed in. A local `destroy()` failure is the only thing
-  that throws, because only a successful destroy actually ends the session on
-  this device. The existing session observer in `RootFeature` then wipes the
-  user cache with no extra wiring.
-- **Scope.** The sign-out client, the `AuthSessionGate` that keeps its destroy
-  serialized against token refresh, their test files, a
-  `prepareDependencies` line in `App`, and one doc update.
-  - New `Core/Sources/Clients/SessionClient.swift`: a `@DependencyClient public
-    struct SessionClient: Sendable` with a single
-    `public var signOut: @Sendable () async throws -> Void`, a `DependencyKey`
-    conformance, and a `DependencyValues.sessionClient` get/set accessor, laid
-    out like `Core/Sources/Clients/NotesClient.swift`. `testValue` is `Self()`,
-    so an un-overridden test call reports an issue. `previewValue` is a no-op.
-  - `liveValue.signOut` resolves `\.apiClient`, `\.authTokensClient`, and
-    `\.networkSession` inside the closure (the same way
-    `JWTAuthClient+Live.swift:23-24` does), so `withDependencies` overrides
-    apply at call time. It reads `@Shared(.authSession)`. When
-    `session?.tokens?.refresh` is present, it sends
+- [ ] **Gap.** The app builds for the Mac: `Destinations.destinations` is
+      `[.iPad, .iPhone, .mac]`
+      (`Tuist/ProjectDescriptionHelpers/Project+Templates.swift:107-111`), and
+      `App/Project.swift:35` signs the `macosx` SDK with `mac.entitlements`.
+      That file enables `com.apple.security.app-sandbox` and nothing else. A
+      sandboxed macOS app without `com.apple.security.network.client` cannot
+      open outgoing connections, so on the Mac every request the template
+      ships fails at the transport layer: the launch-time
+      `refreshExpiredTokens()` in `RootFeature/Sources/RootView.swift:86`, the
+      best-effort revoke in `SessionClient.signOut`, and any `apiClient.send`
+      a clone adds. Because the refresh treats transport errors as transient,
+      the failure is silent: the Mac build never refreshes a session and never
+      reports why.
+- **Desired behavior.** The macOS build can reach the API the template is wired
+  to, with the sandbox still on.
+- **Scope.** Add `<key>com.apple.security.network.client</key>` followed by
+  `<true />` to the top-level dict in `App/mac.entitlements`, indented like the
+  existing key. Do not remove the sandbox. Do not add app groups, associated
+  domains, file-access entitlements, or any other capability, and do not touch
+  `App/ios.entitlements`, since iOS needs no entitlement for outgoing traffic.
+- **Dependencies.** None. Land it before item 2 so the sign-in seam works on
+  every destination the template builds.
+- **Acceptance.** `App/mac.entitlements` holds exactly two keys, both `true`:
+  `com.apple.security.app-sandbox` and `com.apple.security.network.client`.
+- **Validation.**
+  - `plutil -lint App/mac.entitlements`
+  - `plutil -extract com.apple.security.network.client raw App/mac.entitlements`
+    prints `true`
+  - `mise exec -- tuist generate --no-open`, then `mise exec -- tuist build`.
+    If the build produces a signed macOS `Indigo.app`, run
+    `codesign -d --entitlements - --xml` on it and confirm the key is listed.
+
+### 2. Give `SessionClient` a sign-in operation that stores the issued tokens
+
+- [ ] **Gap.** `Core` can restore, refresh, and end a session, but nothing
+      starts one. `SessionClient` (`Core/Sources/Clients/SessionClient.swift:26-29`)
+      has only `signOut`, and no call site in `Core/`, `RootFeature/`, or `App/`
+      exchanges credentials for tokens or calls `authTokensClient.save`.
+      `AuthSessionGate` already expects this writer: an unstaged save "is a
+      fresh sign-in: it writes through and re-arms publication"
+      (`Core/Sources/Clients/AuthSessionGate.swift:32-33`, `:91-94`). The docs
+      point clones the wrong way:
+      - The *Unauthenticated Requests* sign-in snippet
+        (`docs/api-clients.md:420-424`) omits `method(.post)`, so it sends a
+        `GET` to a `POST`-only route.
+      - The three `signIn` fields in the client examples (`:82`, `:109`,
+        `:607`, with the live body at `:627-631`) return the token response to
+        the caller and never persist it. `@Shared(.authSession)` stays `nil`,
+        and the observer in `RootView.swift:119-148` never learns that anyone
+        signed in.
+
+      The backend the template targets exposes `POST /api/v1/auth/sign-in`. It
+      takes `Authorization: Basic base64(email:password)` with no body and no
+      content type. It returns 200 with
+      `{"user": {…}, "accessToken": "…", "refreshToken": "…", "tokenType": "Bearer"}`,
+      or a 4xx with `{"error": "…"}` for bad credentials (`401`,
+      `"Invalid email or password"`), an unverified email (`401`,
+      `"Email not verified"`), and a missing header (`400`).
+- **Desired behavior.** One sign-in path exchanges credentials for tokens and
+  persists them through the gated credential client. Persisting publishes
+  `.valid` on `@Shared(.authSession)`. From there, the existing observer compares
+  the token's `sub` with `lastSignedInUserId` and wipes the user cache on an
+  account switch, with no extra wiring. A failed exchange stores nothing and
+  surfaces the server's message through `APIErrorBody`.
+- **Scope.** One new client endpoint and its tests, plus doc updates. No
+  sign-in screen, no `RootFeature` change, and no public user model.
+  - In `SessionClient.swift`, add
+    `public var signIn: @Sendable (_ email: String, _ password: String) async throws -> Void`.
+    Update the type's doc comment to cover both operations. Make
+    `previewValue.signIn` a no-op. `testValue` stays `SessionClient()`.
+  - `liveValue.signIn` resolves `\.apiClient`, `\.networkSession`, and
+    `\.authTokensClient` inside the closure, as `signOut` and
+    `revokeRefreshToken` do. It sends
     `apiClient.send(decoder: .api, urlSession: networkSession)` with
-    `Path("api", "v1", "auth", "revoke-access")` and
-    `post(RevokeRequest(refreshToken: refresh), encoder: .api)`, decoding a
-    private `struct RevokeResponse: Decodable { let success: Bool }`.
-    - Use `send`, not `sendAuthenticated`. The route authenticates with the
-      refresh token in the body, and `sendAuthenticated` would first try to
-      refresh an expired access token. That rotates the very token about to be
-      revoked and fails outright when offline.
-    - Wrap the request in `do/catch` and log any error with
-      `Logger(subsystem: "Indigo", category: "SessionClient")`, as
-      `RootView.swift:9` does. Then call `try await authTokensClient.destroy()`
-      unconditionally, including when there was no session.
-    - Keep `RevokeRequest` and `RevokeResponse` private to the file, as the
-      refresh models are in `JWTAuthClient+Live.swift:78-85`.
-  - `docs/api-clients.md`, section *Session Lifecycle*:
-    - Add a bullet saying sign-out goes through
-      `@Dependency(\.sessionClient).signOut()`, never a bare
-      `authTokensClient.destroy()`, and why: server revocation comes first and
-      is best effort, and local destroy must succeed.
-    - Replace the placeholder `signOut` field in the two client-organization
-      snippets (`:83`, `:110`) with a field that does not suggest a second
-      sign-out path, e.g. `getProfile`.
-  - Do not add a sign-in or sign-out screen, a sign-in endpoint, or any
-    `RootFeature` change. The existing `.sessionChanged` path already handles
-    the resulting `nil` session.
-- **Dependencies.** None. `Core` already declares `usesSharing: true`
-  (`Core/Project.swift:8`), so `@Shared(.authSession)` compiles in both the
-  target and its tests.
+    `Path("api", "v1", "auth", "sign-in")`, `method(.post)`, and
+    `basicAuth(username: email, password: password)`. It decodes a private
+    `SignInResponse: Decodable { let accessToken: String; let refreshToken: String }`
+    and then calls
+    `try await authTokensClient.save(AuthTokens(access:refresh:))`.
+    - Use `send`, not `sendAuthenticated`: there is no session yet.
+    - Let every request error propagate untouched. Do not log-and-swallow as
+      the revoke does, and do not save on any failure.
+    - Ignore the `user` and `tokenType` fields: identity is read from the
+      token's `sub` claim, as `RootFeature` already does.
+    - Put `SignInResponse` under a new `// MARK: - Sign-in endpoint models`
+      next to the revoke models.
+  - Update `docs/api-clients.md`:
+    - In *Session Lifecycle*, add a bullet before the sign-out bullet: sign-in
+      goes through `@Dependency(\.sessionClient).signIn(email, password)`,
+      which persists the tokens via the gated `authTokensClient.save`. Callers
+      read a failure with `APIErrorBody.from(error)`.
+    - In *Unauthenticated Requests*, replace the basic-auth snippet with a
+      one-line pointer to `sessionClient.signIn`.
+    - Replace the `signIn` field in both client-organization snippets and in
+      the *Complete Example* (field and live body) with non-auth endpoints, so
+      the docs show a single sign-in path. Leave no dangling
+      `SignInPayload`/`Token` references behind.
+- **Dependencies.** Item 1 for the Mac destination. No code dependency.
 - **Acceptance.**
-  - `sessionClient` is a public dependency in `Core`.
-  - With a stored session, `signOut()` issues exactly one `POST` to
-    `/api/v1/auth/revoke-access` whose JSON body carries the stored refresh
-    token, then leaves `@Shared(.authSession)` `nil` and the keychain entries
-    deleted.
-  - A 500 or a transport error from the revoke still ends with the session
-    destroyed and `signOut()` not throwing.
-  - With no stored session, no request is sent and `destroy()` still runs.
-  - When `keychainClient.delete` throws, `signOut()` rethrows.
-  - A token refresh that completes while `signOut()` is in flight cannot
-    republish credentials: `IndigoApp` installs
-    `$0.authTokensClient = .gated`, whose writes serialize through
-    `AuthSessionGate`; a staged refresh publish is dropped once sign-out has
-    begun or its source refresh token is no longer the stored one.
+  - `signIn("user@example.com", "secret")` issues exactly one `POST` to
+    `/api/v1/auth/sign-in`, carrying
+    `Authorization: Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ=` and no body.
+  - On a 200 response, `@Shared(.authSession)?.tokens` holds the returned
+    access and refresh tokens, and both keychain entries were saved.
+  - On a 401 with `{"error":"Invalid email or password"}`, `signIn` throws.
+    `APIErrorBody.from(error)?.error` reads back that message, no keychain
+    save happens, and the session stays `nil`.
+  - On a transport error, `signIn` throws and nothing is saved.
+  - When `keychainClient.save` throws, `signIn` rethrows.
+  - `rg -n 'signIn' docs/api-clients.md` matches only `sessionClient.signIn`
+    references.
 - **Validation.** Run `mise exec -- tuist generate --no-open`, then
   `mise exec -- tuist build`, then `mise exec -- tuist test AllTests`.
-  - Add a `@Suite(.serialized)` `Core/Tests/SessionClientTests.swift`. Give it
-    its own private `URLProtocol` stub scoped to `JWTAuthClient.host`, modeled
-    on `Core/Tests/JWTAuthClientLiveTests.swift:14-49`. The existing stub is
-    `private`. The new one must also record each request's path and body (read
-    `httpBodyStream` when `httpBody` is `nil`).
-  - Drive the real `SessionClient.liveValue.signOut` inside
-    `withDependencies`:
-    - `$0.httpRequestClient = .liveValue`
-    - `$0.jwtAuthClient = .liveValue`, which supplies `baseURL`
-    - `$0.authTokensClient = .liveValue`
-    - `$0.networkSession` set to an ephemeral session with the stub installed
-    - `$0.keychainClient` stubbed to record deletes, as
-      `RootFeature/Tests/RootFeatureTests.swift:27-29` does
-  - Seed the session with `authTokensClient.save(AuthTokens(access: "a",
-    refresh: "r"))` inside the same block, not by assigning `@Shared`.
+  - Extend `Core/Tests/SessionClientTests.swift` rather than adding a suite. The
+    file's private `RevokeStubProtocol` already records path and body. Also
+    record `httpMethod` and the `Authorization` header, and rename the stub
+    (e.g. `AuthStubProtocol`) now that it serves both routes.
+  - Add a `signIn(...)` helper mirroring `signOut(...)`
+    (`SessionClientTests.swift:102-131`), with the same `withDependencies`
+    block (`.gated`, fresh `AuthSessionGate()`, stubbed `networkSession`). It
+    records keychain saves instead of deletes and starts with no seeded
+    session.
+  - Stub a 200 body carrying all four fields the backend sends, so decoding
+    tolerates the ignored `user`/`tokenType` keys.
 
-### 2. Map the version build settings into the app's `Info.plist`
+### 3. Map the version build settings into the app's `Info.plist`
 
 - [ ] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
       `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
@@ -154,3 +184,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Ship the `apiClient` dependency alias in `Core`
 - [x] Extend `usesSharing` to the generated test targets
 - [x] Wipe the user-scoped cache when the auth session changes
+- [x] Ship a sign-out seam that revokes the refresh token before ending the session
