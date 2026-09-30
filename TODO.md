@@ -7,34 +7,37 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Map the version build settings into the app's `Info.plist`
+### 1. Send an explicit JSON content type on the sign-in request
 
-- [x] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
-      `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
-      `Core/Sources/Bundle+Extension.swift` ships `releaseVersionNumber`,
-      `buildVersionNumber`, and `fullVersionString`, which read
-      `CFBundleShortVersionString` and `CFBundleVersion` out of the Info.plist.
-      Nothing connects the two: `App/Project.swift` passes
-      `infoPlist: .extendingDefault(with:)` with only `UILaunchScreen`, so the
-      bundle gets Tuist's defaults and the xcconfig values never reach it.
-      Bumping the version in the xcconfig — the one place a clone would look —
-      changes nothing the app can report.
-- **Desired behavior.** The xcconfig is the single place a version is set, and
-  the bundle reflects it.
-- **Scope.** Add `"CFBundleShortVersionString": "$(MARKETING_VERSION)"` and
-  `"CFBundleVersion": "$(CURRENT_PROJECT_VERSION)"` to the `.extendingDefault`
-  dictionary in `App/Project.swift`. Do not change the values in either
-  xcconfig, do not touch `Bundle+Extension.swift`, and do not add a plist to any
-  framework target — only the app bundle carries a user-facing version.
+- [ ] **Gap.** `SessionClient.signIn` in `Core/Sources/Clients/SessionClient.swift`
+      posts to `api/v1/auth/sign-in` with `method(.post)` and `basicAuth(...)`
+      only. The route takes its credentials from the `Authorization` header and
+      has no body, so the request carries no `Content-Type` at all. The backend
+      has been observed to reject a bodyless POST that does not declare a JSON
+      content type, which would make the shipped sign-in fail against a real
+      deployment while every stubbed test passes — the existing tests record
+      the method, path, body, and `Authorization` header but never a content
+      type.
+- **Desired behavior.** The sign-in request always declares
+  `Content-Type: application/json`, even though it has no body.
+- **Scope.** Add the JSON content-type modifier to the sign-in request builder
+  in `SessionClient.signIn` (`jsonContentRequest` from `HTTPRequestBuilder`; if
+  the pinned version lacks it, set the header directly with
+  `header(key: "Content-Type", value: "application/json")`). Extend the
+  `AuthStubProtocol` recorder in `Core/Tests/SessionClientTests.swift` with a
+  `Content-Type` field and assert it in
+  `signInExchangesCredentialsAndStoresTheTokens`. Leave the revoke request
+  alone — it carries a JSON body, so the encoder already sets the header. Update
+  the sign-in paragraph of `docs/api-clients.md` only if it lists the request's
+  headers.
 - **Dependencies.** None.
-- **Acceptance.** The generated app Info.plist under `App/Derived/InfoPlists/`
-  (filename follows `appTarget`) contains both keys with the `$(…)` references,
-  and a Debug build resolves `CFBundleShortVersionString` to `0.0.1`.
+- **Acceptance.** The recorded sign-in request has `Content-Type` equal to
+  `application/json` and still has an empty body and the same `Authorization`
+  header; every existing `SessionClientTests` case still passes.
 - **Validation.** `mise exec -- tuist generate --no-open`, then
-  `rg 'MARKETING_VERSION|CURRENT_PROJECT_VERSION' App/Derived/InfoPlists/`.
-  Build with `mise exec -- tuist build` and read
-  `CFBundleShortVersionString` back out of the built `Info.plist` with
-  `plutil -p`.
+  `mise exec -- tuist build` (this compiles the test target, so the new
+  assertion must build). The assertion itself runs in CI's
+  `tuist test --platform ios`.
 
 ## Completed
 
@@ -60,3 +63,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Ship a sign-out seam that revokes the refresh token before ending the session
 - [x] Let the sandboxed macOS app open outgoing network connections
 - [x] Give `SessionClient` a sign-in operation that stores the issued tokens
+- [x] Map the version build settings into the app's `Info.plist`
