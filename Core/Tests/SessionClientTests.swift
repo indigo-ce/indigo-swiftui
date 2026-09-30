@@ -14,7 +14,7 @@ import Testing
 // a `URLProtocol` to the API host is the seam that remains. Unlike the
 // refresh stub in `JWTAuthClientLiveTests.swift`, this one also records each
 // request's method, path, body (read from `httpBodyStream`, which is where
-// URLSession hands the body to a `URLProtocol`), and `Authorization` header.
+// URLSession hands the body to a `URLProtocol`), and the `Authorization` and `Content-Type` headers.
 private final class AuthStubProtocol: URLProtocol {
   struct Stub: Sendable {
     var statusCode: Int
@@ -27,6 +27,7 @@ private final class AuthStubProtocol: URLProtocol {
     var path: String
     var body: Data
     var authorizationHeader: String?
+    var contentTypeHeader: String?
   }
 
   nonisolated(unsafe) static var stub = Stub(statusCode: 200, body: Data())
@@ -50,7 +51,8 @@ private final class AuthStubProtocol: URLProtocol {
         httpMethod: request.httpMethod ?? "GET",
         path: request.url?.path ?? "",
         body: Self.body(of: request),
-        authorizationHeader: request.allHTTPHeaderFields?["Authorization"]
+        authorizationHeader: request.allHTTPHeaderFields?["Authorization"],
+        contentTypeHeader: request.allHTTPHeaderFields?["Content-Type"]
       )
     )
     let stub = Self.stub
@@ -210,6 +212,7 @@ private final class AuthStubProtocol: URLProtocol {
         == "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ="
     )
     #expect(requests.first?.body.isEmpty == true)
+    #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
 
     #expect(saves == [.accessToken, .refreshToken])
     @Shared(.authSession) var session: AuthSession?

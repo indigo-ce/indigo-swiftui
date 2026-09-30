@@ -63,7 +63,10 @@ extension SessionClient: DependencyKey {
         urlSession: networkSession
       ) {
         Path("api", "v1", "auth", "sign-in")
+        // No body, but the server still rejects the POST without an explicit
+        // JSON content type.
         method(.post)
+        jsonContentRequest
         basicAuth(username: email, password: password)
       }.value
 
