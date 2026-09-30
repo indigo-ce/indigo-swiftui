@@ -148,15 +148,38 @@ private final class AuthStubProtocol: URLProtocol {
   }
 
   /// Mirrors `signOut(...)` for sign-in: drives the real
-  /// `SessionClient.liveValue.signIn`, records the keychain saves it performs,
-  /// and starts with no seeded session. Returning the saves lets tests assert
-  /// that a failed exchange stores nothing.
+  /// `SessionClient.liveValue.signIn` starting from no session, records the
+  /// keychain saves it performs, and returns them so tests can assert that a
+  /// failed exchange stores nothing. Resetting on every call keeps the
+  /// serialized suite order-independent. Seeding, when asked, runs in its own
+  /// dependency scope with throwaway keychain stubs so the seeded writes are
+  /// not recorded as sign-in saves.
   private func signIn(
     signInStub: AuthStubProtocol.Stub = Self.signInSuccessStub,
+    seedTokens: Bool = false,
     keychainSave: (@Sendable (String, KeychainClient.Keys) async throws -> Void)? = nil
   ) async throws -> [KeychainClient.Keys] {
     AuthStubProtocol.stub = signInStub
     AuthStubProtocol.requests = []
+    // Explicitly clear the shared session — a prior test may have left one
+    // published, and the failure tests below assert that nothing was stored.
+    @Shared(.authSession) var session: AuthSession?
+    $session.withLock { $0 = nil }
+    if seedTokens {
+      try await withDependencies {
+        $0.httpRequestClient = .liveValue
+        $0.jwtAuthClient = .liveValue
+        $0.authTokensClient = .gated
+        $0.authSessionGate = AuthSessionGate()
+        $0.networkSession = stubbedSession()
+        $0.keychainClient.save = { _, _ in }
+        $0.keychainClient.load = { _ in nil }
+        $0.keychainClient.delete = { _ in }
+      } operation: {
+        try await AuthTokensClient.liveValue.save(AuthTokens(access: "a-old", refresh: "r-old"))
+      }
+      AuthStubProtocol.requests = []
+    }
     let saves = LockIsolated<[KeychainClient.Keys]>([])
     try await withDependencies {
       $0.httpRequestClient = .liveValue
@@ -187,6 +210,29 @@ private final class AuthStubProtocol: URLProtocol {
         == "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ="
     )
     #expect(requests.first?.body.isEmpty == true)
+
+    #expect(saves == [.accessToken, .refreshToken])
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session?.tokens == AuthTokens(access: "access-1", refresh: "refresh-1"))
+  }
+
+  /// Signing in over an existing session is an account switch: the displaced
+  /// refresh token must be revoked before the save overwrites it, or it stays
+  /// live on the server with no device copy left to revoke later.
+  @Test func signInDisplacesAnExistingSessionAndRevokesItsRefreshToken() async throws {
+    let saves = try await signIn(seedTokens: true)
+    let requests = AuthStubProtocol.requests
+
+    #expect(requests.count == 2)
+    #expect(requests.first?.httpMethod == "POST")
+    #expect(requests.first?.path == "/api/v1/auth/sign-in")
+    #expect(
+      requests.first?.authorizationHeader
+        == "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ="
+    )
+    #expect(requests.last?.path == "/api/v1/auth/revoke-access")
+    let revoked = String(decoding: requests.last?.body ?? Data(), as: UTF8.self)
+    #expect(revoked.contains(#""refreshToken":"r-old""#))
 
     #expect(saves == [.accessToken, .refreshToken])
     @Shared(.authSession) var session: AuthSession?

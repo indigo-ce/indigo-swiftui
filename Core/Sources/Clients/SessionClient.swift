@@ -49,6 +49,7 @@ extension SessionClient: DependencyKey {
       @Dependency(\.apiClient) var apiClient
       @Dependency(\.networkSession) var networkSession
       @Dependency(\.authTokensClient) var authTokensClient
+      @Shared(.authSession) var session: AuthSession?
 
       // `send`, not `sendAuthenticated`: there is no session yet. The route
       // authenticates with `Authorization: Basic base64(email:password)`, no
@@ -65,6 +66,14 @@ extension SessionClient: DependencyKey {
         method(.post)
         basicAuth(username: email, password: password)
       }.value
+
+      // Signing in can also switch accounts: the save below overwrites the
+      // previous session, and its refresh token would stay live on the
+      // server with no copy left on the device to revoke later. Capture and
+      // revoke it first — the same reason `signOut` revokes before destroy.
+      if let displacedRefresh = session?.tokens?.refresh {
+        await revokeRefreshToken(displacedRefresh)
+      }
 
       try await authTokensClient.save(
         AuthTokens(access: response.accessToken, refresh: response.refreshToken)
