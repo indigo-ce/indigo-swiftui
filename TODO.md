@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Map the version build settings into the app's `Info.plist`
 
-- [ ] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
+- [x] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
       `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
       `Core/Sources/Bundle+Extension.swift` ships `releaseVersionNumber`,
       `buildVersionNumber`, and `fullVersionString`, which read

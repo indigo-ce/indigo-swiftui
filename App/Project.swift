@@ -18,6 +18,8 @@ let project = Project(
       deploymentTargets: .platforms,
       infoPlist: .extendingDefault(
         with: [
+          "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+          "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
           "UILaunchScreen": [
             "UIColorName": "",
             "UIImageName": ""
