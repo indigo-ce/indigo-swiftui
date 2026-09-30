@@ -26,7 +26,19 @@ cd "$(dirname "$0")/.." || { echo "Failed to change to repository root"; exit 1;
 mise exec -- tuist install --verbose || { echo "Failed to install dependencies"; exit 1; }
 
 # Generate the Xcode workspace and projects using Tuist
-mise exec -- tuist generate || { echo "Failed to generate Xcode workspace"; exit 1; }
+# Keep stdout alive to prevent Xcode Cloud's 15-minute inactivity timeout
+GENERATE_EXIT=0
+# Give the heartbeat its own process group so its sleep child dies with it
+set -m
+while true; do echo "tuist generate running..."; sleep 60; done &
+KEEPALIVE_PID=$!
+mise exec -- tuist generate || GENERATE_EXIT=$?
+kill -- -"$KEEPALIVE_PID" 2>/dev/null || true
+wait "$KEEPALIVE_PID" 2>/dev/null || true
+# A sleep forked while the first kill scanned the group escapes it; stop it too
+kill -- -"$KEEPALIVE_PID" 2>/dev/null || true
+set +m
+[ "$GENERATE_EXIT" -ne 0 ] && { echo "Failed to generate Xcode workspace"; exit 1; }
 
 # Skip macro fingerprint validation for Xcode Cloud
 defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES

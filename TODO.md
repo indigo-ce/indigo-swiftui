@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Keep Xcode Cloud output alive while `tuist generate` runs
 
-- [ ] **Gap.** `ci_scripts/ci_post_clone.sh` runs `mise exec -- tuist generate`
+- [x] **Gap.** `ci_scripts/ci_post_clone.sh` runs `mise exec -- tuist generate`
       with no output of its own for the duration of the command. Generating a
       workspace with the full dependency graph can stay silent for many
       minutes, and Xcode Cloud kills a post-clone script that prints nothing
