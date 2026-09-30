@@ -7,37 +7,37 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Send an explicit JSON content type on the sign-in request
+### 1. Keep Xcode Cloud output alive while `tuist generate` runs
 
-- [x] **Gap.** `SessionClient.signIn` in `Core/Sources/Clients/SessionClient.swift`
-      posts to `api/v1/auth/sign-in` with `method(.post)` and `basicAuth(...)`
-      only. The route takes its credentials from the `Authorization` header and
-      has no body, so the request carries no `Content-Type` at all. The backend
-      has been observed to reject a bodyless POST that does not declare a JSON
-      content type, which would make the shipped sign-in fail against a real
-      deployment while every stubbed test passes — the existing tests record
-      the method, path, body, and `Authorization` header but never a content
-      type.
-- **Desired behavior.** The sign-in request always declares
-  `Content-Type: application/json`, even though it has no body.
-- **Scope.** Add the JSON content-type modifier to the sign-in request builder
-  in `SessionClient.signIn` (`jsonContentRequest` from `HTTPRequestBuilder`; if
-  the pinned version lacks it, set the header directly with
-  `header(key: "Content-Type", value: "application/json")`). Extend the
-  `AuthStubProtocol` recorder in `Core/Tests/SessionClientTests.swift` with a
-  `Content-Type` field and assert it in
-  `signInExchangesCredentialsAndStoresTheTokens`. Leave the revoke request
-  alone — it carries a JSON body, so the encoder already sets the header. Update
-  the sign-in paragraph of `docs/api-clients.md` only if it lists the request's
-  headers.
+- [ ] **Gap.** `ci_scripts/ci_post_clone.sh` runs `mise exec -- tuist generate`
+      with no output of its own for the duration of the command. Generating a
+      workspace with the full dependency graph can stay silent for many
+      minutes, and Xcode Cloud kills a post-clone script that prints nothing
+      for 15 minutes. `tuist install` already passes `--verbose` for exactly
+      this reason; `generate` has no equivalent, so a slow generate fails the
+      build with an inactivity timeout rather than a real error.
+- **Desired behavior.** A background heartbeat prints a line every 60 seconds
+  while `tuist generate` runs, is always stopped afterwards, and a failed
+  generate still fails the script with the existing error message.
+- **Scope.** Edit only `ci_scripts/ci_post_clone.sh`. Start the heartbeat
+  (`while true; do echo "tuist generate running..."; sleep 60; done &`) just
+  before the generate step and capture its PID. Under `set -e` a failing
+  command exits before any following `$?` capture runs, so record the exit
+  status without tripping it (for example
+  `mise exec -- tuist generate || GENERATE_EXIT=$?` with `GENERATE_EXIT=0`
+  set first, or a `trap 'kill $KEEPALIVE_PID 2>/dev/null' EXIT`), kill the
+  heartbeat on both paths, and keep the `Failed to generate Xcode workspace`
+  message and non-zero exit on failure. Leave the install step and the
+  macro-fingerprint `defaults write` line as they are.
 - **Dependencies.** None.
-- **Acceptance.** The recorded sign-in request has `Content-Type` equal to
-  `application/json` and still has an empty body and the same `Authorization`
-  header; every existing `SessionClientTests` case still passes.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build` (this compiles the test target, so the new
-  assertion must build). The assertion itself runs in CI's
-  `tuist test --platform ios`.
+- **Acceptance.** On success the script exits 0 with the heartbeat process
+  gone; on a failing generate it prints `Failed to generate Xcode workspace`,
+  exits 1, and leaves no heartbeat running; no other line of the script
+  changes behavior.
+- **Validation.** `bash -n ci_scripts/ci_post_clone.sh` for syntax, then
+  `mise exec -- tuist generate --no-open` and `mise exec -- tuist build` to
+  confirm nothing else moved. The Xcode Cloud timeout itself cannot be
+  exercised headlessly.
 
 ## Completed
 
@@ -64,3 +64,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Let the sandboxed macOS app open outgoing network connections
 - [x] Give `SessionClient` a sign-in operation that stores the issued tokens
 - [x] Map the version build settings into the app's `Info.plist`
+- [x] Send an explicit JSON content type on the sign-in request
