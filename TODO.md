@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Send an explicit JSON content type on the sign-in request
 
-- [ ] **Gap.** `SessionClient.signIn` in `Core/Sources/Clients/SessionClient.swift`
+- [x] **Gap.** `SessionClient.signIn` in `Core/Sources/Clients/SessionClient.swift`
       posts to `api/v1/auth/sign-in` with `method(.post)` and `basicAuth(...)`
       only. The route takes its credentials from the `Authorization` header and
       has no body, so the request carries no `Content-Type` at all. The backend

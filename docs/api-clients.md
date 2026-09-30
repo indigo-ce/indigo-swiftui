@@ -336,7 +336,8 @@ Tokens live in two layers, and the library keeps them in lockstep:
 - Sign-in goes through
   `@Dependency(\.sessionClient).signIn(email, password)`, which exchanges the
   credentials for tokens (`POST /api/v1/auth/sign-in` with
-  `Authorization: Basic base64(email:password)`, no body) and persists them
+  `Authorization: Basic base64(email:password)` and
+  `Content-Type: application/json; charset=utf-8`, no body) and persists them
   through the gated `authTokensClient.save` — that save is what publishes the
   session on `@Shared(.authSession)`. A failed exchange stores nothing and
   rethrows; read the server's message with `APIErrorBody.from(error)`.
