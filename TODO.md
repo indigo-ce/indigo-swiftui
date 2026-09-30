@@ -7,41 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Let the sandboxed macOS app open outgoing network connections
-
-- [x] **Gap.** The app builds for the Mac: `Destinations.destinations` is
-      `[.iPad, .iPhone, .mac]`
-      (`Tuist/ProjectDescriptionHelpers/Project+Templates.swift:107-111`), and
-      `App/Project.swift:35` signs the `macosx` SDK with `mac.entitlements`.
-      That file enables `com.apple.security.app-sandbox` and nothing else. A
-      sandboxed macOS app without `com.apple.security.network.client` cannot
-      open outgoing connections, so on the Mac every request the template
-      ships fails at the transport layer: the launch-time
-      `refreshExpiredTokens()` in `RootFeature/Sources/RootView.swift:86`, the
-      best-effort revoke in `SessionClient.signOut`, and any `apiClient.send`
-      a clone adds. Because the refresh treats transport errors as transient,
-      the failure is silent: the Mac build never refreshes a session and never
-      reports why.
-- **Desired behavior.** The macOS build can reach the API the template is wired
-  to, with the sandbox still on.
-- **Scope.** Add `<key>com.apple.security.network.client</key>` followed by
-  `<true />` to the top-level dict in `App/mac.entitlements`, indented like the
-  existing key. Do not remove the sandbox. Do not add app groups, associated
-  domains, file-access entitlements, or any other capability, and do not touch
-  `App/ios.entitlements`, since iOS needs no entitlement for outgoing traffic.
-- **Dependencies.** None. Land it before item 2 so the sign-in seam works on
-  every destination the template builds.
-- **Acceptance.** `App/mac.entitlements` holds exactly two keys, both `true`:
-  `com.apple.security.app-sandbox` and `com.apple.security.network.client`.
-- **Validation.**
-  - `plutil -lint App/mac.entitlements`
-  - `plutil -extract com.apple.security.network.client raw App/mac.entitlements`
-    prints `true`
-  - `mise exec -- tuist generate --no-open`, then `mise exec -- tuist build`.
-    If the build produces a signed macOS `Indigo.app`, run
-    `codesign -d --entitlements - --xml` on it and confirm the key is listed.
-
-### 2. Give `SessionClient` a sign-in operation that stores the issued tokens
+### 1. Give `SessionClient` a sign-in operation that stores the issued tokens
 
 - [ ] **Gap.** `Core` can restore, refresh, and end a session, but nothing
       starts one. `SessionClient` (`Core/Sources/Clients/SessionClient.swift:26-29`)
@@ -106,7 +72,9 @@ do not rely on a simulator run.
       the *Complete Example* (field and live body) with non-auth endpoints, so
       the docs show a single sign-in path. Leave no dangling
       `SignInPayload`/`Token` references behind.
-- **Dependencies.** Item 1 for the Mac destination. No code dependency.
+- **Dependencies.** None. The macOS sandbox already allows outgoing
+  connections (`App/mac.entitlements`), so the route is reachable on every
+  destination.
 - **Acceptance.**
   - `signIn("user@example.com", "secret")` issues exactly one `POST` to
     `/api/v1/auth/sign-in`, carrying
@@ -134,7 +102,7 @@ do not rely on a simulator run.
   - Stub a 200 body carrying all four fields the backend sends, so decoding
     tolerates the ignored `user`/`tokenType` keys.
 
-### 3. Map the version build settings into the app's `Info.plist`
+### 2. Map the version build settings into the app's `Info.plist`
 
 - [ ] **Gap.** `Configs/Debug.xcconfig` and `Configs/Release.xcconfig` set
       `MARKETING_VERSION=0.0.1` and `CURRENT_PROJECT_VERSION=1`, and
@@ -185,3 +153,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Extend `usesSharing` to the generated test targets
 - [x] Wipe the user-scoped cache when the auth session changes
 - [x] Ship a sign-out seam that revokes the refresh token before ending the session
+- [x] Let the sandboxed macOS app open outgoing network connections
