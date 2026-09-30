@@ -7,15 +7,15 @@ import Testing
 
 @testable import Core
 
-// Intercepts the revoke request at the transport layer so the tests below
-// drive the real `SessionClient.liveValue.signOut` closure end to end.
-// `HTTPRequestClient.send` is a `let` endpoint with an internal initializer,
-// so the client itself cannot be stubbed per endpoint — scoping a
-// `URLProtocol` to the API host is the seam that remains. Unlike the refresh
-// stub in `JWTAuthClientLiveTests.swift`, this one also records each
-// request's path and body (read from `httpBodyStream`, which is where
-// URLSession hands the body to a `URLProtocol`).
-private final class RevokeStubProtocol: URLProtocol {
+// Intercepts the session requests (revoke, sign-in) at the transport layer
+// so the tests below drive the real `SessionClient.liveValue` closures end to
+// end. `HTTPRequestClient.send` is a `let` endpoint with an internal
+// initializer, so the client itself cannot be stubbed per endpoint — scoping
+// a `URLProtocol` to the API host is the seam that remains. Unlike the
+// refresh stub in `JWTAuthClientLiveTests.swift`, this one also records each
+// request's method, path, body (read from `httpBodyStream`, which is where
+// URLSession hands the body to a `URLProtocol`), and `Authorization` header.
+private final class AuthStubProtocol: URLProtocol {
   struct Stub: Sendable {
     var statusCode: Int
     var body: Data
@@ -23,8 +23,10 @@ private final class RevokeStubProtocol: URLProtocol {
   }
 
   struct Recorded: Equatable, Sendable {
+    var httpMethod: String
     var path: String
     var body: Data
+    var authorizationHeader: String?
   }
 
   nonisolated(unsafe) static var stub = Stub(statusCode: 200, body: Data())
@@ -44,7 +46,12 @@ private final class RevokeStubProtocol: URLProtocol {
       return
     }
     Self.requests.append(
-      Recorded(path: request.url?.path ?? "", body: Self.body(of: request))
+      Recorded(
+        httpMethod: request.httpMethod ?? "GET",
+        path: request.url?.path ?? "",
+        body: Self.body(of: request),
+        authorizationHeader: request.allHTTPHeaderFields?["Authorization"]
+      )
     )
     let stub = Self.stub
     guard let url = request.url,
@@ -84,14 +91,24 @@ private final class RevokeStubProtocol: URLProtocol {
 }
 
 @Suite(.serialized) struct SessionClientTests {
-  private static let successStub = RevokeStubProtocol.Stub(
+  private static let successStub = AuthStubProtocol.Stub(
     statusCode: 200,
     body: Data(#"{"success":true}"#.utf8)
   )
 
+  /// All four fields the backend sends, so decoding must tolerate the ignored
+  /// `user` and `tokenType` keys.
+  private static let signInSuccessStub = AuthStubProtocol.Stub(
+    statusCode: 200,
+    body: Data(
+      #"{"user":{"id":"u1"},"accessToken":"access-1","refreshToken":"refresh-1","tokenType":"Bearer"}"#
+        .utf8
+    )
+  )
+
   private func stubbedSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [RevokeStubProtocol.self]
+    configuration.protocolClasses = [AuthStubProtocol.self]
     return URLSession(configuration: configuration)
   }
 
@@ -101,11 +118,11 @@ private final class RevokeStubProtocol: URLProtocol {
   /// keeps the serialized suite order-independent.
   private func signOut(
     seedTokens: Bool = true,
-    revokeStub: RevokeStubProtocol.Stub = Self.successStub,
+    revokeStub: AuthStubProtocol.Stub = Self.successStub,
     keychainDelete: (@Sendable (KeychainClient.Keys) async throws -> Void)? = nil
   ) async throws -> [KeychainClient.Keys] {
-    RevokeStubProtocol.stub = revokeStub
-    RevokeStubProtocol.requests = []
+    AuthStubProtocol.stub = revokeStub
+    AuthStubProtocol.requests = []
     let deletes = LockIsolated<[KeychainClient.Keys]>([])
     try await withDependencies {
       // The live pipeline is the subject under test; only the transport and
@@ -130,9 +147,96 @@ private final class RevokeStubProtocol: URLProtocol {
     return deletes.value
   }
 
+  /// Mirrors `signOut(...)` for sign-in: drives the real
+  /// `SessionClient.liveValue.signIn`, records the keychain saves it performs,
+  /// and starts with no seeded session. Returning the saves lets tests assert
+  /// that a failed exchange stores nothing.
+  private func signIn(
+    signInStub: AuthStubProtocol.Stub = Self.signInSuccessStub,
+    keychainSave: (@Sendable (String, KeychainClient.Keys) async throws -> Void)? = nil
+  ) async throws -> [KeychainClient.Keys] {
+    AuthStubProtocol.stub = signInStub
+    AuthStubProtocol.requests = []
+    let saves = LockIsolated<[KeychainClient.Keys]>([])
+    try await withDependencies {
+      $0.httpRequestClient = .liveValue
+      $0.jwtAuthClient = .liveValue
+      $0.authTokensClient = .gated
+      $0.authSessionGate = AuthSessionGate()
+      $0.networkSession = stubbedSession()
+      $0.keychainClient.save = keychainSave ?? { _, key in
+        saves.withValue { $0.append(key) }
+      }
+      $0.keychainClient.load = { _ in nil }
+      $0.keychainClient.delete = { _ in }
+    } operation: {
+      try await SessionClient.liveValue.signIn("user@example.com", "secret")
+    }
+    return saves.value
+  }
+
+  @Test func signInExchangesCredentialsAndStoresTheTokens() async throws {
+    let saves = try await signIn()
+    let requests = AuthStubProtocol.requests
+
+    #expect(requests.count == 1)
+    #expect(requests.first?.httpMethod == "POST")
+    #expect(requests.first?.path == "/api/v1/auth/sign-in")
+    #expect(
+      requests.first?.authorizationHeader
+        == "Basic dXNlckBleGFtcGxlLmNvbTpzZWNyZXQ="
+    )
+    #expect(requests.first?.body.isEmpty == true)
+
+    #expect(saves == [.accessToken, .refreshToken])
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session?.tokens == AuthTokens(access: "access-1", refresh: "refresh-1"))
+  }
+
+  @Test func signIn401ThrowsAndStoresNothing() async throws {
+    do {
+      _ = try await signIn(
+        signInStub: AuthStubProtocol.Stub(
+          statusCode: 401,
+          body: Data(#"{"error":"Invalid email or password"}"#.utf8)
+        )
+      )
+      Issue.record("Expected the 401 to throw, but signIn succeeded")
+    } catch {
+      #expect(APIErrorBody.from(error)?.error == "Invalid email or password")
+    }
+    #expect(AuthStubProtocol.requests.count == 1)
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session == nil)
+  }
+
+  @Test func signInTransportFailureThrowsAndStoresNothing() async throws {
+    do {
+      _ = try await signIn(
+        signInStub: AuthStubProtocol.Stub(
+          statusCode: 200,
+          body: Data(),
+          transportError: URLError(.notConnectedToInternet)
+        )
+      )
+      Issue.record("Expected the transport failure to throw, but signIn succeeded")
+    } catch {}
+    #expect(AuthStubProtocol.requests.isEmpty)
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session == nil)
+  }
+
+  @Test func signInKeychainFailureRethrows() async throws {
+    await #expect(throws: URLError(.badURL).self) {
+      _ = try await signIn(
+        keychainSave: { _, _ in throw URLError(.badURL) }
+      )
+    }
+  }
+
   @Test func signOutRevokesTheRefreshTokenThenDestroysTheSession() async throws {
     let deletes = try await signOut()
-    let requests = RevokeStubProtocol.requests
+    let requests = AuthStubProtocol.requests
 
     #expect(requests.count == 1)
     #expect(requests.first?.path == "/api/v1/auth/revoke-access")
@@ -146,10 +250,10 @@ private final class RevokeStubProtocol: URLProtocol {
 
   @Test func revoke500StillDestroysTheSessionWithoutThrowing() async throws {
     let deletes = try await signOut(
-      revokeStub: RevokeStubProtocol.Stub(statusCode: 500, body: Data("boom".utf8))
+      revokeStub: AuthStubProtocol.Stub(statusCode: 500, body: Data("boom".utf8))
     )
 
-    #expect(RevokeStubProtocol.requests.count == 1)
+    #expect(AuthStubProtocol.requests.count == 1)
     #expect(deletes == [.accessToken, .refreshToken])
     @Shared(.authSession) var session: AuthSession?
     #expect(session == nil)
@@ -157,14 +261,14 @@ private final class RevokeStubProtocol: URLProtocol {
 
   @Test func revokeTransportFailureStillDestroysTheSessionWithoutThrowing() async throws {
     let deletes = try await signOut(
-      revokeStub: RevokeStubProtocol.Stub(
+      revokeStub: AuthStubProtocol.Stub(
         statusCode: 200,
         body: Data(),
         transportError: URLError(.notConnectedToInternet)
       )
     )
 
-    #expect(RevokeStubProtocol.requests.isEmpty)
+    #expect(AuthStubProtocol.requests.isEmpty)
     #expect(deletes == [.accessToken, .refreshToken])
     @Shared(.authSession) var session: AuthSession?
     #expect(session == nil)
@@ -173,7 +277,7 @@ private final class RevokeStubProtocol: URLProtocol {
   @Test func signOutWithoutSessionSkipsTheRevokeAndStillDestroys() async throws {
     let deletes = try await signOut(seedTokens: false)
 
-    #expect(RevokeStubProtocol.requests.isEmpty)
+    #expect(AuthStubProtocol.requests.isEmpty)
     #expect(deletes == [.accessToken, .refreshToken])
   }
 
@@ -187,8 +291,8 @@ private final class RevokeStubProtocol: URLProtocol {
       $0.authTokensClient = .gated
       $0.authSessionGate = AuthSessionGate()
       $0.networkSession = stubbedSession()
-      RevokeStubProtocol.stub = Self.successStub
-      RevokeStubProtocol.requests = []
+      AuthStubProtocol.stub = Self.successStub
+      AuthStubProtocol.requests = []
       $0.keychainClient.save = { _, _ in }
       $0.keychainClient.load = { _ in nil }
       $0.keychainClient.delete = { _ in }
@@ -203,8 +307,8 @@ private final class RevokeStubProtocol: URLProtocol {
         $0.authTokensClient = .gated
         $0.authSessionGate = AuthSessionGate()
         $0.networkSession = stubbedSession()
-        RevokeStubProtocol.stub = Self.successStub
-        RevokeStubProtocol.requests = []
+        AuthStubProtocol.stub = Self.successStub
+        AuthStubProtocol.requests = []
         $0.keychainClient.save = { _, _ in }
         $0.keychainClient.load = { _ in nil }
         $0.keychainClient.delete = { _ in throw URLError(.badURL) }
@@ -228,8 +332,8 @@ private final class RevokeStubProtocol: URLProtocol {
       $0.authTokensClient = .gated
       $0.authSessionGate = AuthSessionGate()
       $0.networkSession = stubbedSession()
-      RevokeStubProtocol.stub = Self.successStub
-      RevokeStubProtocol.requests = []
+      AuthStubProtocol.stub = Self.successStub
+      AuthStubProtocol.requests = []
       $0.keychainClient.save = { _, _ in }
       $0.keychainClient.load = { _ in nil }
       $0.keychainClient.delete = { _ in }
@@ -249,7 +353,7 @@ private final class RevokeStubProtocol: URLProtocol {
 
       @Shared(.authSession) var session: AuthSession?
       #expect(session == nil)
-      let revoked = RevokeStubProtocol.requests.map { String(decoding: $0.body, as: UTF8.self) }
+      let revoked = AuthStubProtocol.requests.map { String(decoding: $0.body, as: UTF8.self) }
       #expect(revoked.count == 2)
       #expect(revoked.first?.contains(#""refreshToken":"r""#) == true)
       #expect(revoked.last?.contains(#""refreshToken":"r2""#) == true)

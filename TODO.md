@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Give `SessionClient` a sign-in operation that stores the issued tokens
 
-- [ ] **Gap.** `Core` can restore, refresh, and end a session, but nothing
+- [x] **Gap.** `Core` can restore, refresh, and end a session, but nothing
       starts one. `SessionClient` (`Core/Sources/Clients/SessionClient.swift:26-29`)
       has only `signOut`, and no call site in `Core/`, `RootFeature/`, or `App/`
       exchanges credentials for tokens or calls `authTokensClient.save`.
