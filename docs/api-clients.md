@@ -79,7 +79,6 @@ For apps with a limited number of endpoints, a single client keeps things simple
 ```swift
 @DependencyClient
 public struct MyAPIClient: Sendable {
-  public var signIn: @Sendable (_ with: SignInPayload) async throws -> Token
   public var getProfile: @Sendable () async throws -> Profile
   public var getStacks: @Sendable () async throws -> [Stack]
   public var createStack: @Sendable (_ stack: CreateStack) async throws -> Stack
@@ -106,9 +105,8 @@ For larger APIs, split clients by domain:
 // AuthAPIClient.swift
 @DependencyClient
 public struct AuthAPIClient: Sendable {
-  public var signIn: @Sendable (_ payload: SignInPayload) async throws -> Token
   public var getProfile: @Sendable () async throws -> Profile
-  public var refreshToken: @Sendable () async throws -> Token
+  public var refreshToken: @Sendable () async throws -> Void
 }
 
 // GamesAPIClient.swift
@@ -335,6 +333,13 @@ Tokens live in two layers, and the library keeps them in lockstep:
   `.sessionLoaded`) as soon as the restore lands and only then calls
   `refreshExpiredTokens()` in the background — the shipped launch call site
   to copy: restore, render, then refresh.
+- Sign-in goes through
+  `@Dependency(\.sessionClient).signIn(email, password)`, which exchanges the
+  credentials for tokens (`POST /api/v1/auth/sign-in` with
+  `Authorization: Basic base64(email:password)`, no body) and persists them
+  through the gated `authTokensClient.save` — that save is what publishes the
+  session on `@Shared(.authSession)`. A failed exchange stores nothing and
+  rethrows; read the server's message with `APIErrorBody.from(error)`.
 - Sign-out goes through `@Dependency(\.sessionClient).signOut()` — never a
   bare `authTokensClient.destroy()`. `signOut` first revokes the refresh token
   on the server on a **best-effort** basis (`POST /api/v1/auth/revoke-access`
@@ -416,13 +421,12 @@ For public endpoints (sign-in, sign-up, public data):
 try await apiClient.send(urlSession: networkSession) {
   Path("api", "v1", "games")
 }.value
-
-// With basic auth for sign-in
-try await apiClient.send(urlSession: networkSession) {
-  Path("api", "v1", "auth", "sign-in")
-  basicAuth(username: email, password: password)
-}.value
 ```
+
+Sign-in is not a hand-rolled request: it goes through
+`@Dependency(\.sessionClient).signIn(email, password)`, which sends the
+`POST /api/v1/auth/sign-in` basic-auth exchange and persists the issued tokens
+(see [Session Lifecycle](#session-lifecycle)).
 
 ## Request Building
 
@@ -604,9 +608,9 @@ import HTTPRequestClient
 
 @DependencyClient
 public struct MyAPIClient: Sendable {
-  public var signIn: @Sendable (_ with: SignInPayload) async throws -> Token
   public var getStacks: @Sendable () async throws -> [Stack]
   public var createStack: @Sendable (_ stack: CreateStack) async throws -> Stack
+  public var deleteStack: @Sendable (_ id: UUID) async throws -> Void
 }
 
 public enum APIClientError: Error {
@@ -624,12 +628,7 @@ extension MyAPIClient: DependencyKey {
     @Dependency(\.apiClient) var apiClient
     @Dependency(\.networkSession) var networkSession
 
-    return Self { payload in
-      try await apiClient.send(urlSession: networkSession) {
-        Path("api", "v1", "auth", "sign-in")
-        basicAuth(username: payload.email, password: payload.password)
-      }.value
-    } getStacks: {
+    return Self {
       try await apiClient.sendAuthenticated(decoder: .api, urlSession: networkSession) {
         Path("api", "v1", "stacks")
       }.value
@@ -637,6 +636,11 @@ extension MyAPIClient: DependencyKey {
       try await apiClient.sendAuthenticated(decoder: .api, urlSession: networkSession) {
         Path("api", "v1", "stacks")
         post(stack, encoder: .api)
+      }.value
+    } deleteStack: { id in
+      try await apiClient.sendAuthenticated(decoder: .api, urlSession: networkSession) {
+        Path("api", "v1", "stacks", id)
+        method(.delete)
       }.value
     }
   }()

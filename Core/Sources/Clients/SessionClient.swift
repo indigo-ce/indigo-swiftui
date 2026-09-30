@@ -11,20 +11,32 @@ private let logger = Logger(subsystem: "Indigo", category: "SessionClient")
 
 // MARK: - Live implementation
 
-/// The one sign-out operation the template ships. It runs in a fixed order:
-/// revoke the refresh token on the server on a **best-effort** basis, then
-/// destroy the local credentials. A revoke failure (offline, 5xx, timeout) is
-/// logged and never keeps the user signed in — the stored token material is
-/// what actually ends the session on this device, so only its destruction can
-/// throw. The resulting session change is what the observer in `RootFeature`
-/// already reacts to: the user-scoped cache is wiped with no extra wiring.
+/// The two session lifecycle operations the template ships: sign-in and
+/// sign-out.
+///
+/// Sign-out runs in a fixed order: revoke the refresh token on the server on
+/// a **best-effort** basis, then destroy the local credentials. A revoke
+/// failure (offline, 5xx, timeout) is logged and never keeps the user signed
+/// in — the stored token material is what actually ends the session on this
+/// device, so only its destruction can throw. The resulting session change is
+/// what the observer in `RootFeature` already reacts to: the user-scoped cache
+/// is wiped with no extra wiring.
 ///
 /// Call this from a sign-out control instead of `authTokensClient.destroy()`:
 /// destroying locally alone leaves the refresh token alive on the server,
 /// where anyone who copied it off the device can keep minting access tokens
 /// until it expires.
+///
+/// Sign-in is the mirror image: it exchanges credentials for tokens and
+/// persists them through the gated credential client. Persisting is what
+/// publishes `.valid` on `@Shared(.authSession)`; the observer in
+/// `RootFeature` then reacts with no extra wiring (and wipes the user-scoped
+/// cache when the token's `sub` claim switches account). A failed exchange
+/// stores nothing: every request error propagates untouched to the caller,
+/// who can surface the server's message through `APIErrorBody.from(error)`.
 @DependencyClient
 public struct SessionClient: Sendable {
+  public var signIn: @Sendable (_ email: String, _ password: String) async throws -> Void
   public var signOut: @Sendable () async throws -> Void
 }
 
@@ -33,6 +45,40 @@ extension SessionClient: DependencyKey {
   // `JWTAuthClient+Live.swift` does — so `withDependencies` overrides apply
   // at call time.
   public static let liveValue: SessionClient = Self(
+    signIn: { email, password in
+      @Dependency(\.apiClient) var apiClient
+      @Dependency(\.networkSession) var networkSession
+      @Dependency(\.authTokensClient) var authTokensClient
+      @Shared(.authSession) var session: AuthSession?
+
+      // `send`, not `sendAuthenticated`: there is no session yet. The route
+      // authenticates with `Authorization: Basic base64(email:password)`, no
+      // body, and answers 200 with the token pair (`user` and `tokenType` are
+      // ignored — identity is read from the token's `sub` claim, as
+      // `RootFeature` already does). Saving through the gated credential
+      // client is what publishes the session; any request failure leaves the
+      // stored credentials untouched and rethrows.
+      let response: SignInResponse = try await apiClient.send(
+        decoder: .api,
+        urlSession: networkSession
+      ) {
+        Path("api", "v1", "auth", "sign-in")
+        method(.post)
+        basicAuth(username: email, password: password)
+      }.value
+
+      // Signing in can also switch accounts: the save below overwrites the
+      // previous session, and its refresh token would stay live on the
+      // server with no copy left on the device to revoke later. Capture and
+      // revoke it first — the same reason `signOut` revokes before destroy.
+      if let displacedRefresh = session?.tokens?.refresh {
+        await revokeRefreshToken(displacedRefresh)
+      }
+
+      try await authTokensClient.save(
+        AuthTokens(access: response.accessToken, refresh: response.refreshToken)
+      )
+    },
     signOut: {
       @Dependency(\.authTokensClient) var authTokensClient
       @Dependency(\.authSessionGate) var gate
@@ -54,7 +100,7 @@ extension SessionClient: DependencyKey {
   )
 
   public static var previewValue: SessionClient {
-    SessionClient(signOut: {})
+    SessionClient(signIn: { _, _ in }, signOut: {})
   }
 
   public static var testValue: SessionClient {
@@ -95,6 +141,17 @@ func revokeRefreshToken(_ refresh: String) async {
     // callers must not be blocked by an unreachable revoke endpoint.
     logger.error("Refresh-token revoke failed: \(error, privacy: .public)")
   }
+}
+
+// MARK: - Sign-in endpoint models
+
+// The sign-in response shape. Keep it private to this file, the same way the
+// revoke models below and the refresh models in `JWTAuthClient+Live.swift`
+// are. The backend also sends `user` and `tokenType`, which are deliberately
+// not modeled: identity is read from the token's `sub` claim.
+private struct SignInResponse: Decodable, Sendable {
+  let accessToken: String
+  let refreshToken: String
 }
 
 // MARK: - Revoke endpoint models
