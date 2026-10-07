@@ -7,37 +7,90 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Keep Xcode Cloud output alive while `tuist generate` runs
+### 1. Point DEBUG builds at the local backend dev server
 
-- [x] **Gap.** `ci_scripts/ci_post_clone.sh` runs `mise exec -- tuist generate`
-      with no output of its own for the duration of the command. Generating a
-      workspace with the full dependency graph can stay silent for many
-      minutes, and Xcode Cloud kills a post-clone script that prints nothing
-      for 15 minutes. `tuist install` already passes `--verbose` for exactly
-      this reason; `generate` has no equivalent, so a slow generate fails the
-      build with an inactivity timeout rather than a real error.
-- **Desired behavior.** A background heartbeat prints a line every 60 seconds
-  while `tuist generate` runs, is always stopped afterwards, and a failed
-  generate still fails the script with the existing error message.
-- **Scope.** Edit only `ci_scripts/ci_post_clone.sh`. Start the heartbeat
-  (`while true; do echo "tuist generate running..."; sleep 60; done &`) just
-  before the generate step and capture its PID. Under `set -e` a failing
-  command exits before any following `$?` capture runs, so record the exit
-  status without tripping it (for example
-  `mise exec -- tuist generate || GENERATE_EXIT=$?` with `GENERATE_EXIT=0`
-  set first, or a `trap 'kill $KEEPALIVE_PID 2>/dev/null' EXIT`), kill the
-  heartbeat on both paths, and keep the `Failed to generate Xcode workspace`
-  message and non-zero exit on failure. Leave the install step and the
-  macro-fingerprint `defaults write` line as they are.
+- [ ] **Gap.** `JWTAuthClient.host` in
+      `Core/Sources/Clients/JWTAuthClient+Live.swift` is a single constant,
+      `https://api.example.com`, used by every build configuration. The
+      sign-in, refresh, and revoke requests (and every client that resolves
+      `baseURL` through `apiClient`) therefore have nowhere to go during
+      development: a fresh clone cannot exercise the shipped session flow
+      against a locally running backend without editing the release host.
+      `docs/api-clients.md` ("Environment-Based Host") already recommends a
+      `#if DEBUG` split with `http://localhost:4321`, but the shipped code
+      does not follow it.
+- **Desired behavior.** DEBUG builds talk to the backend's local dev server
+  at `http://localhost:4321`; Release builds keep the placeholder production
+  host for the cloner to replace.
+- **Scope.** In `JWTAuthClient+Live.swift`, declare `host` under
+  `#if DEBUG` / `#else` — `"http://localhost:4321"` for DEBUG,
+  `"https://api.example.com"` otherwise — and update its doc comment and the
+  file header to say which configuration uses which host. Mirror the snippet
+  in the "Setting Up JWT Authentication" section of `docs/api-clients.md`
+  so the doc still matches the shipped file. No ATS or entitlement change:
+  loopback HTTP is permitted, and the macOS network-client entitlement
+  already ships. Do not introduce a configuration object or Info.plist key.
 - **Dependencies.** None.
-- **Acceptance.** On success the script exits 0 with the heartbeat process
-  gone; on a failing generate it prints `Failed to generate Xcode workspace`,
-  exits 1, and leaves no heartbeat running; no other line of the script
-  changes behavior.
-- **Validation.** `bash -n ci_scripts/ci_post_clone.sh` for syntax, then
-  `mise exec -- tuist generate --no-open` and `mise exec -- tuist build` to
-  confirm nothing else moved. The Xcode Cloud timeout itself cannot be
-  exercised headlessly.
+- **Acceptance.** A Debug build resolves `JWTAuthClient.host` to
+  `http://localhost:4321`, a Release build to `https://api.example.com`;
+  `SessionClientTests` and `JWTAuthClientLiveTests` still intercept
+  requests, because their `URLProtocol` stubs match on
+  `URL(string: JWTAuthClient.host)?.host` rather than a literal; the doc
+  snippet matches the source.
+- **Validation.** `mise exec -- tuist generate --no-open` and
+  `mise exec -- tuist build`; check that `JWTAuthClient.host` has no other
+  hard-coded copy with
+  `rg -n 'api\.example\.com|localhost:4321' Core docs`.
+
+### 2. Bump the Tuist pin to 4.208.0
+
+- [ ] **Gap.** `mise.toml` pins `tuist = "4.202.2"`, which is several
+      releases behind the current 4.208 line. CI (`.github/workflows/tests.yml`)
+      and Xcode Cloud (`ci_scripts/ci_post_clone.sh`) both install whatever
+      `mise.toml` names, so the template keeps generating with an old Tuist
+      until the pin moves.
+- **Desired behavior.** Local, GitHub Actions, and Xcode Cloud runs all use
+  Tuist 4.208.0 and generate the same workspace as before.
+- **Scope.** Change only the `tuist` version in `mise.toml`. No manifest
+  changes are expected. If generation newly fails or warns, fix it in the
+  same PR only when the fix is a mechanical manifest adjustment the new
+  Tuist asks for. Otherwise drop the bump and record the blocker here. Keep
+  the `xctest-dynamic-overlay` hold in `Package.swift` as it is; it is a
+  separate decision.
+- **Dependencies.** None.
+- **Acceptance.** `mise.toml` pins 4.208.0; `mise exec -- tuist version`
+  reports it; generate and build succeed with no new warnings attributable
+  to the bump.
+- **Validation.** `mise install`, `mise exec -- tuist version`,
+  `mise exec -- tuist install`, `mise exec -- tuist generate --no-open`,
+  `mise exec -- tuist build`.
+
+### 3. Ship an app privacy manifest
+
+- [ ] **Gap.** The app bundle has no `PrivacyInfo.xcprivacy`. App Store
+      Connect rejects uploads whose first-party code uses a required-reason
+      API without declaring it, and the template already does:
+      `RootFeature` persists `lastSignedInUserId` through
+      `@Shared(.appStorage(...))`, which reads and writes `UserDefaults`.
+      Every clone inherits the omission and finds out at upload time.
+- **Desired behavior.** The app ships a minimal privacy manifest that
+  declares exactly what the template's own code uses and states that it does
+  no tracking. Cloners extend it as they add APIs.
+- **Scope.** Add `App/Resources/PrivacyInfo.xcprivacy` (the `Resources`
+  buildable folder bundles it with no manifest change) containing
+  `NSPrivacyTracking` = `false` and one `NSPrivacyAccessedAPITypes` entry:
+  `NSPrivacyAccessedAPICategoryUserDefaults` with reason `CA92.1` (data
+  accessed only by the app itself). Do not declare categories the template
+  does not use. Third-party packages ship their own manifests. Add one line
+  to the "Setup" section of `README.md` telling cloners to
+  extend the manifest when they adopt further required-reason APIs.
+- **Dependencies.** None.
+- **Acceptance.** The file is a valid plist with exactly the keys above, and
+  the built app bundle contains `PrivacyInfo.xcprivacy`.
+- **Validation.** `plutil -lint App/Resources/PrivacyInfo.xcprivacy`, then
+  `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`.
+  Confirm the file is in the built `.app`, for example with
+  `find ~/Library/Developer/Xcode/DerivedData -path '*Indigo.app*/PrivacyInfo.xcprivacy'`.
 
 ## Completed
 
@@ -65,3 +118,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Give `SessionClient` a sign-in operation that stores the issued tokens
 - [x] Map the version build settings into the app's `Info.plist`
 - [x] Send an explicit JSON content type on the sign-in request
+- [x] Keep Xcode Cloud output alive while `tuist generate` runs
