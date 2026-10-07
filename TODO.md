@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Point DEBUG builds at the local backend dev server
 
-- [ ] **Gap.** `JWTAuthClient.host` in
+- [x] **Gap.** `JWTAuthClient.host` in
       `Core/Sources/Clients/JWTAuthClient+Live.swift` is a single constant,
       `https://api.example.com`, used by every build configuration. The
       sign-in, refresh, and revoke requests (and every client that resolves

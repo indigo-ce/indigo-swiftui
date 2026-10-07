@@ -233,7 +233,7 @@ return Self { page in
 
 ### Setting Up JWT Authentication
 
-The template ships this wiring in `Core/Sources/Clients/JWTAuthClient+Live.swift` — copy it and adjust `host`, the refresh endpoint path, and the request/response models to match your backend:
+The template ships this wiring in `Core/Sources/Clients/JWTAuthClient+Live.swift` — copy it and adjust the Release `host`, the refresh endpoint path, and the request/response models to match your backend; DEBUG builds already talk to the local dev server:
 
 ```swift
 import Dependencies
@@ -243,8 +243,14 @@ import HTTPRequestClient
 import JWTAuth
 
 extension JWTAuthClient: @retroactive DependencyKey {
-  /// Base URL of your API. Replace with your real host (or read it from config).
-  public static let host = "https://api.example.com"
+  /// Base URL of your API. DEBUG builds point at the backend's local dev
+  /// server; Release builds carry the placeholder production host — replace
+  /// it with your real host (or read it from config).
+  #if DEBUG
+    public static let host = "http://localhost:4321"
+  #else
+    public static let host = "https://api.example.com"
+  #endif
 
   public static let liveValue = Self(
     baseURL: { host },
