@@ -11,11 +11,20 @@ import JWTAuth
 // app's job — that's what this file does.
 //
 // Adjust `host`, the refresh endpoint path, and the request/response models to
-// match your backend. The one part you should NOT change casually is the error
-// mapping in `refresh` — see the note below.
+// match your backend. `host` is configuration-dependent: DEBUG builds talk to
+// the local dev server at `http://localhost:4321`; Release builds carry the
+// placeholder `https://api.example.com` for you to replace. The one part you
+// should NOT change casually is the error mapping in `refresh` — see the note
+// below.
 extension JWTAuthClient: @retroactive DependencyKey {
-  /// Base URL of your API. Replace with your real host (or read it from config).
-  public static let host = "https://api.example.com"
+  /// Base URL of your API. DEBUG builds point at the backend's local dev
+  /// server; Release builds carry the placeholder production host — replace
+  /// it with your real host (or read it from config).
+  #if DEBUG
+    public static let host = "http://localhost:4321"
+  #else
+    public static let host = "https://api.example.com"
+  #endif
 
   public static let liveValue = Self(
     baseURL: { host },
