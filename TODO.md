@@ -7,42 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Point DEBUG builds at the local backend dev server
-
-- [x] **Gap.** `JWTAuthClient.host` in
-      `Core/Sources/Clients/JWTAuthClient+Live.swift` is a single constant,
-      `https://api.example.com`, used by every build configuration. The
-      sign-in, refresh, and revoke requests (and every client that resolves
-      `baseURL` through `apiClient`) therefore have nowhere to go during
-      development: a fresh clone cannot exercise the shipped session flow
-      against a locally running backend without editing the release host.
-      `docs/api-clients.md` ("Environment-Based Host") already recommends a
-      `#if DEBUG` split with `http://localhost:4321`, but the shipped code
-      does not follow it.
-- **Desired behavior.** DEBUG builds talk to the backend's local dev server
-  at `http://localhost:4321`; Release builds keep the placeholder production
-  host for the cloner to replace.
-- **Scope.** In `JWTAuthClient+Live.swift`, declare `host` under
-  `#if DEBUG` / `#else` — `"http://localhost:4321"` for DEBUG,
-  `"https://api.example.com"` otherwise — and update its doc comment and the
-  file header to say which configuration uses which host. Mirror the snippet
-  in the "Setting Up JWT Authentication" section of `docs/api-clients.md`
-  so the doc still matches the shipped file. No ATS or entitlement change:
-  loopback HTTP is permitted, and the macOS network-client entitlement
-  already ships. Do not introduce a configuration object or Info.plist key.
-- **Dependencies.** None.
-- **Acceptance.** A Debug build resolves `JWTAuthClient.host` to
-  `http://localhost:4321`, a Release build to `https://api.example.com`;
-  `SessionClientTests` and `JWTAuthClientLiveTests` still intercept
-  requests, because their `URLProtocol` stubs match on
-  `URL(string: JWTAuthClient.host)?.host` rather than a literal; the doc
-  snippet matches the source.
-- **Validation.** `mise exec -- tuist generate --no-open` and
-  `mise exec -- tuist build`; check that `JWTAuthClient.host` has no other
-  hard-coded copy with
-  `rg -n 'api\.example\.com|localhost:4321' Core docs`.
-
-### 2. Bump the Tuist pin to 4.208.0
+### 1. Bump the Tuist pin to 4.208.0
 
 - [ ] **Gap.** `mise.toml` pins `tuist = "4.202.2"`, which is several
       releases behind the current 4.208 line. CI (`.github/workflows/tests.yml`)
@@ -65,7 +30,7 @@ do not rely on a simulator run.
   `mise exec -- tuist install`, `mise exec -- tuist generate --no-open`,
   `mise exec -- tuist build`.
 
-### 3. Ship an app privacy manifest
+### 2. Ship an app privacy manifest
 
 - [ ] **Gap.** The app bundle has no `PrivacyInfo.xcprivacy`. App Store
       Connect rejects uploads whose first-party code uses a required-reason
@@ -119,3 +84,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Map the version build settings into the app's `Info.plist`
 - [x] Send an explicit JSON content type on the sign-in request
 - [x] Keep Xcode Cloud output alive while `tuist generate` runs
+- [x] Point DEBUG builds at the local backend dev server
