@@ -7,30 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Bump the Tuist pin to 4.208.0
-
-- [x] **Gap.** `mise.toml` pins `tuist = "4.202.2"`, which is several
-      releases behind the current 4.208 line. CI (`.github/workflows/tests.yml`)
-      and Xcode Cloud (`ci_scripts/ci_post_clone.sh`) both install whatever
-      `mise.toml` names, so the template keeps generating with an old Tuist
-      until the pin moves.
-- **Desired behavior.** Local, GitHub Actions, and Xcode Cloud runs all use
-  Tuist 4.208.0 and generate the same workspace as before.
-- **Scope.** Change only the `tuist` version in `mise.toml`. No manifest
-  changes are expected. If generation newly fails or warns, fix it in the
-  same PR only when the fix is a mechanical manifest adjustment the new
-  Tuist asks for. Otherwise drop the bump and record the blocker here. Keep
-  the `xctest-dynamic-overlay` hold in `Package.swift` as it is; it is a
-  separate decision.
-- **Dependencies.** None.
-- **Acceptance.** `mise.toml` pins 4.208.0; `mise exec -- tuist version`
-  reports it; generate and build succeed with no new warnings attributable
-  to the bump.
-- **Validation.** `mise install`, `mise exec -- tuist version`,
-  `mise exec -- tuist install`, `mise exec -- tuist generate --no-open`,
-  `mise exec -- tuist build`.
-
-### 2. Ship an app privacy manifest
+### 1. Ship an app privacy manifest
 
 - [ ] **Gap.** The app bundle has no `PrivacyInfo.xcprivacy`. App Store
       Connect rejects uploads whose first-party code uses a required-reason
@@ -56,6 +33,39 @@ do not rely on a simulator run.
   `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`.
   Confirm the file is in the built `.app`, for example with
   `find ~/Library/Developer/Xcode/DerivedData -path '*Indigo.app*/PrivacyInfo.xcprivacy'`.
+
+### 2. Move the cache database out of Documents and split it by configuration
+
+- [ ] **Gap.** `appDatabase()` in `Core/Sources/Database/Connection.swift`
+      opens the live database at `URL.documentsDirectory/db.sqlite`. That
+      database is a regenerable, user-scoped cache (see
+      `docs/local-caching.md` and `UserCacheReset`). Documents is the
+      user-facing folder: it is backed up to iCloud, and it becomes visible
+      in Files as soon as a cloner enables file sharing. Debug and Release
+      also share the one file. On a device that runs both the `Indigo` and
+      `Indigo Release` schemes, the DEBUG-only
+      `eraseDatabaseOnSchemaChange` can wipe the Release build's cache, and a
+      Debug schema in progress can leak into Release runs.
+- **Desired behavior.** The live cache lives under Application Support, out
+  of the user's Documents, with a separate file per build configuration.
+- **Scope.** In the `.live` branch of `appDatabase()`, resolve
+  `URL.applicationSupportDirectory`, create it with
+  `FileManager.default.createDirectory(at:withIntermediateDirectories: true)`
+  (it does not exist on first launch), and open `cache-debug.sqlite` under
+  `#if DEBUG` and `cache.sqlite` otherwise. Leave the preview (in-memory) and
+  test (per-test temp file) branches, the migrator, and the trace setup
+  untouched. Make it a clean cutover with no migration from the old
+  Documents path; the template has no installed base. Update the `.live`
+  path in the `appDatabase()` sample in `docs/local-caching.md` to match.
+- **Dependencies.** None.
+- **Acceptance.** `Connection.swift` and `docs/local-caching.md` have no
+  `documentsDirectory` reference left. The live path is under Application
+  Support, and the file name differs between Debug and Release. The
+  directory is created before `DatabasePool` opens. Existing `CoreTests` and
+  `RootFeatureTests` stay unchanged, because they run under the test
+  context.
+- **Validation.** `grep -rn documentsDirectory Core docs` returns nothing,
+  then `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`.
 
 ## Completed
 
@@ -85,3 +95,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Send an explicit JSON content type on the sign-in request
 - [x] Keep Xcode Cloud output alive while `tuist generate` runs
 - [x] Point DEBUG builds at the local backend dev server
+- [x] Bump the Tuist pin to 4.208.0
