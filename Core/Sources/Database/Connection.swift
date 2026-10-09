@@ -32,10 +32,12 @@ public func appDatabase() throws -> any DatabaseWriter {
     let path: String
     if context == .live {
       let folder = URL.applicationSupportDirectory
+        .appending(component: "Database", directoryHint: .isDirectory)
       try FileManager.default.createDirectory(
         at: folder,
         withIntermediateDirectories: true
       )
+      try (folder as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
       #if DEBUG
         let file = folder.appending(component: "cache-debug.sqlite")
       #else
