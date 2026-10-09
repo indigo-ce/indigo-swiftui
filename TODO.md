@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Ship an app privacy manifest
 
-- [ ] **Gap.** The app bundle has no `PrivacyInfo.xcprivacy`. App Store
+- [x] **Gap.** The app bundle has no `PrivacyInfo.xcprivacy`. App Store
       Connect rejects uploads whose first-party code uses a required-reason
       API without declaring it, and the template already does:
       `RootFeature` persists `lastSignedInUserId` through
