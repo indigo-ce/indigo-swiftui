@@ -33,6 +33,8 @@ A modular SwiftUI template using [Tuist](https://tuist.dev/) and [The Composable
    open Indigo.xcworkspace
    ```
 
+5. **Extend the privacy manifest** in `App/Resources/PrivacyInfo.xcprivacy` as you adopt more required-reason APIs.
+
 ## Skills (Optional)
 
 Install xbridge for Xcode integration:
