@@ -7,34 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Ship an app privacy manifest
-
-- [x] **Gap.** The app bundle has no `PrivacyInfo.xcprivacy`. App Store
-      Connect rejects uploads whose first-party code uses a required-reason
-      API without declaring it, and the template already does:
-      `RootFeature` persists `lastSignedInUserId` through
-      `@Shared(.appStorage(...))`, which reads and writes `UserDefaults`.
-      Every clone inherits the omission and finds out at upload time.
-- **Desired behavior.** The app ships a minimal privacy manifest that
-  declares exactly what the template's own code uses and states that it does
-  no tracking. Cloners extend it as they add APIs.
-- **Scope.** Add `App/Resources/PrivacyInfo.xcprivacy` (the `Resources`
-  buildable folder bundles it with no manifest change) containing
-  `NSPrivacyTracking` = `false` and one `NSPrivacyAccessedAPITypes` entry:
-  `NSPrivacyAccessedAPICategoryUserDefaults` with reason `CA92.1` (data
-  accessed only by the app itself). Do not declare categories the template
-  does not use. Third-party packages ship their own manifests. Add one line
-  to the "Setup" section of `README.md` telling cloners to
-  extend the manifest when they adopt further required-reason APIs.
-- **Dependencies.** None.
-- **Acceptance.** The file is a valid plist with exactly the keys above, and
-  the built app bundle contains `PrivacyInfo.xcprivacy`.
-- **Validation.** `plutil -lint App/Resources/PrivacyInfo.xcprivacy`, then
-  `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`.
-  Confirm the file is in the built `.app`, for example with
-  `find ~/Library/Developer/Xcode/DerivedData -path '*Indigo.app*/PrivacyInfo.xcprivacy'`.
-
-### 2. Move the cache database out of Documents and split it by configuration
+### 1. Move the cache database out of Documents and split it by configuration
 
 - [ ] **Gap.** `appDatabase()` in `Core/Sources/Database/Connection.swift`
       opens the live database at `URL.documentsDirectory/db.sqlite`. That
@@ -67,6 +40,35 @@ do not rely on a simulator run.
 - **Validation.** `grep -rn documentsDirectory Core docs` returns nothing,
   then `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`.
 
+### 2. Adopt Xcode's recommended build settings in the App xcconfigs
+
+- [ ] **Gap.** The framework projects get `ENABLE_MODULE_VERIFIER`,
+      `MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS` and
+      `STRING_CATALOG_GENERATE_SYMBOLS` from
+      `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`. The `App`
+      project takes its settings only from `Configs/Debug.xcconfig` and
+      `Configs/Release.xcconfig`, and neither file sets those keys or
+      `REGISTER_APP_GROUPS`. Xcode 26 therefore raises "Update to recommended
+      settings" on the `App` project. Accepting the prompt in Xcode does not
+      stick, because the next `tuist generate` throws the change away, so
+      every clone keeps seeing the warning.
+- **Desired behavior.** The `App` project carries the same recommended
+  settings as the framework template, persisted in the xcconfigs so they
+  survive regeneration.
+- **Scope.** In the `// Xcode` section of both xcconfigs, add
+  `ENABLE_MODULE_VERIFIER=YES`,
+  `MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS="gnu11 gnu++14"`,
+  `REGISTER_APP_GROUPS=YES` and `STRING_CATALOG_GENERATE_SYMBOLS=YES`, in
+  the file's existing `KEY=VALUE` style. Do not change `App/Project.swift`,
+  the framework template, or any other key.
+- **Dependencies.** None.
+- **Acceptance.** Both xcconfigs set all four keys to the values above, and
+  the two files still differ only in their existing Debug/Release-specific
+  lines.
+- **Validation.** `grep -cE '^(ENABLE_MODULE_VERIFIER|MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS|REGISTER_APP_GROUPS|STRING_CATALOG_GENERATE_SYMBOLS)=' Configs/Debug.xcconfig Configs/Release.xcconfig`
+  reports 4 for each file, then `mise exec -- tuist generate --no-open` and
+  `mise exec -- tuist build`.
+
 ## Completed
 
 Shipped and merged; kept as a short record so the work is not re-proposed.
@@ -96,3 +98,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Keep Xcode Cloud output alive while `tuist generate` runs
 - [x] Point DEBUG builds at the local backend dev server
 - [x] Bump the Tuist pin to 4.208.0
+- [x] Ship an app privacy manifest
