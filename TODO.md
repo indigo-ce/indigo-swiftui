@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Bump the Tuist pin to 4.208.0
 
-- [ ] **Gap.** `mise.toml` pins `tuist = "4.202.2"`, which is several
+- [x] **Gap.** `mise.toml` pins `tuist = "4.202.2"`, which is several
       releases behind the current 4.208 line. CI (`.github/workflows/tests.yml`)
       and Xcode Cloud (`ci_scripts/ci_post_clone.sh`) both install whatever
       `mise.toml` names, so the template keeps generating with an old Tuist
