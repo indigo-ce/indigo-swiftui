@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Adopt Xcode's recommended build settings in the App xcconfigs
 
-- [ ] **Gap.** The framework projects get `ENABLE_MODULE_VERIFIER`,
+- [x] **Gap.** The framework projects get `ENABLE_MODULE_VERIFIER`,
       `MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS` and
       `STRING_CATALOG_GENERATE_SYMBOLS` from
       `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`. The `App`
