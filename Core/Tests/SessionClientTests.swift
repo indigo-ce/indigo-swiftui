@@ -216,32 +216,69 @@ private final class AuthStubProtocol: URLProtocol {
     return saves.value
   }
 
+  /// What the keychain stubs saw while the operation ran. The contract under
+  /// test is that the account-entry operations never touch credentials, so
+  /// every test asserts this stays empty — an accidental read, write, or
+  /// delete fails loudly instead of passing silently.
+  private struct KeychainInteractions: Equatable, Sendable {
+    var saves: [KeychainClient.Keys] = []
+    var loads: [KeychainClient.Keys] = []
+    var deletes: [KeychainClient.Keys] = []
+  }
+
   /// Mirrors `signIn(...)` for the credential-free account-entry operations:
   /// drives a `SessionClient.liveValue` closure against the stubbed transport
-  /// starting from no stored session. There is no keychain interaction to
-  /// record — the contract under test is that these operations never touch
-  /// credentials. Resetting on every call keeps the serialized suite
-  /// order-independent.
+  /// and returns every keychain interaction the stubs observed, so a test can
+  /// assert the operation left the stored credentials alone. With
+  /// `seedTokens`, a session is published first — in its own dependency scope
+  /// with throwaway stubs, so the seeded write is not recorded as an
+  /// interaction of the operation under test. Resetting on every call keeps
+  /// the serialized suite order-independent.
   private func unauthenticated(
     _ stub: AuthStubProtocol.Stub,
+    seedTokens: Bool = false,
     operation: () async throws -> Void
-  ) async throws {
+  ) async throws -> KeychainInteractions {
     AuthStubProtocol.stub = stub
     AuthStubProtocol.requests = []
     @Shared(.authSession) var session: AuthSession?
     $session.withLock { $0 = nil }
+    if seedTokens {
+      try await withDependencies {
+        $0.httpRequestClient = .liveValue
+        $0.jwtAuthClient = .liveValue
+        $0.authTokensClient = .gated
+        $0.authSessionGate = AuthSessionGate()
+        $0.networkSession = stubbedSession()
+        $0.keychainClient.save = { _, _ in }
+        $0.keychainClient.load = { _ in nil }
+        $0.keychainClient.delete = { _ in }
+      } operation: {
+        try await AuthTokensClient.liveValue.save(AuthTokens(access: "a-old", refresh: "r-old"))
+      }
+      AuthStubProtocol.requests = []
+    }
+    let interactions = LockIsolated(KeychainInteractions())
     try await withDependencies {
       $0.httpRequestClient = .liveValue
       $0.jwtAuthClient = .liveValue
       $0.authTokensClient = .gated
       $0.authSessionGate = AuthSessionGate()
       $0.networkSession = stubbedSession()
-      $0.keychainClient.save = { _, _ in }
-      $0.keychainClient.load = { _ in nil }
-      $0.keychainClient.delete = { _ in }
+      $0.keychainClient.save = { _, key in
+        interactions.withValue { $0.saves.append(key) }
+      }
+      $0.keychainClient.load = { key in
+        interactions.withValue { $0.loads.append(key) }
+        return nil
+      }
+      $0.keychainClient.delete = { key in
+        interactions.withValue { $0.deletes.append(key) }
+      }
     } operation: {
       try await operation()
     }
+    return interactions.value
   }
 
   @Test func signInExchangesCredentialsAndStoresTheTokens() async throws {
@@ -330,7 +367,7 @@ private final class AuthStubProtocol: URLProtocol {
   // MARK: Sign-up and password-reset request
 
   @Test func signUpSendsTheExpectedRequestAndLeavesTheSessionAlone() async throws {
-    try await unauthenticated(Self.signUpSuccessStub) {
+    let interactions = try await unauthenticated(Self.signUpSuccessStub) {
       try await SessionClient.liveValue.signUp("Test User", "newuser@example.com", "secret")
     }
     let requests = AuthStubProtocol.requests
@@ -345,14 +382,40 @@ private final class AuthStubProtocol: URLProtocol {
     #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
     #expect(requests.first?.authorizationHeader == nil)
 
-    // Signing up does not sign in: no credential write, no published session.
+    // Signing up does not sign in: no credential write, no published session,
+    // and no keychain interaction at all — no read, write, or delete.
     @Shared(.authSession) var session: AuthSession?
     #expect(session == nil)
+    #expect(interactions == KeychainInteractions())
+  }
+
+  /// With a session already published, neither operation may disturb it: no
+  /// overwrite, no revoke, no destroy — not even a keychain read.
+  @Test func signUpAndPasswordResetLeaveAnExistingSessionUntouched() async throws {
+    @Shared(.authSession) var session: AuthSession?
+
+    let signUpInteractions = try await unauthenticated(Self.signUpSuccessStub, seedTokens: true) {
+      try await SessionClient.liveValue.signUp("Test User", "newuser@example.com", "secret")
+    }
+    #expect(AuthStubProtocol.requests.count == 1)
+    #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
+    #expect(signUpInteractions == KeychainInteractions())
+
+    let resetInteractions = try await unauthenticated(
+      Self.passwordResetSuccessStub,
+      seedTokens: true
+    ) {
+      try await SessionClient.liveValue.requestPasswordReset("user@example.com")
+    }
+    #expect(AuthStubProtocol.requests.count == 1)
+    #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
+    #expect(resetInteractions == KeychainInteractions())
   }
 
   @Test func signUp400ThrowsABadResponseWhoseBodyAPIErrorBodyDecodes() async throws {
+    var interactions = KeychainInteractions()
     do {
-      try await unauthenticated(
+      interactions = try await unauthenticated(
         AuthStubProtocol.Stub(
           statusCode: 400,
           body: Data(#"{"error":"User already exists"}"#.utf8)
@@ -370,10 +433,11 @@ private final class AuthStubProtocol: URLProtocol {
     }
     @Shared(.authSession) var session: AuthSession?
     #expect(session == nil)
+    #expect(interactions == KeychainInteractions())
   }
 
   @Test func requestPasswordResetSendsTheExpectedRequest() async throws {
-    try await unauthenticated(Self.passwordResetSuccessStub) {
+    let interactions = try await unauthenticated(Self.passwordResetSuccessStub) {
       try await SessionClient.liveValue.requestPasswordReset("user@example.com")
     }
     let requests = AuthStubProtocol.requests
@@ -385,6 +449,7 @@ private final class AuthStubProtocol: URLProtocol {
     #expect(body.contains(#""email":"user@example.com""#))
     #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
     #expect(requests.first?.authorizationHeader == nil)
+    #expect(interactions == KeychainInteractions())
   }
 
   @Test func signOutRevokesTheRefreshTokenThenDestroysTheSession() async throws {
