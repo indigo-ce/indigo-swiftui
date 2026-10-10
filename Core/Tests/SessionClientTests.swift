@@ -1,5 +1,6 @@
 import Dependencies
 import Foundation
+import HTTPRequestClient
 import JWTAuth
 import Sharing
 import SQLiteData
@@ -108,6 +109,21 @@ private final class AuthStubProtocol: URLProtocol {
     )
   )
 
+  /// All fields the backend sends on sign-up, so decoding must tolerate the
+  /// ignored `user` and web-session `token` keys.
+  private static let signUpSuccessStub = AuthStubProtocol.Stub(
+    statusCode: 200,
+    body: Data(
+      #"{"user":{"id":"u1","name":"Test User"},"token":"web-session-token"}"#.utf8
+    )
+  )
+
+  /// Both fields the backend sends on a password-reset request.
+  private static let passwordResetSuccessStub = AuthStubProtocol.Stub(
+    statusCode: 200,
+    body: Data(#"{"status":true,"message":"Reset link sent"}"#.utf8)
+  )
+
   private func stubbedSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [AuthStubProtocol.self]
@@ -200,6 +216,34 @@ private final class AuthStubProtocol: URLProtocol {
     return saves.value
   }
 
+  /// Mirrors `signIn(...)` for the credential-free account-entry operations:
+  /// drives a `SessionClient.liveValue` closure against the stubbed transport
+  /// starting from no stored session. There is no keychain interaction to
+  /// record — the contract under test is that these operations never touch
+  /// credentials. Resetting on every call keeps the serialized suite
+  /// order-independent.
+  private func unauthenticated(
+    _ stub: AuthStubProtocol.Stub,
+    operation: () async throws -> Void
+  ) async throws {
+    AuthStubProtocol.stub = stub
+    AuthStubProtocol.requests = []
+    @Shared(.authSession) var session: AuthSession?
+    $session.withLock { $0 = nil }
+    try await withDependencies {
+      $0.httpRequestClient = .liveValue
+      $0.jwtAuthClient = .liveValue
+      $0.authTokensClient = .gated
+      $0.authSessionGate = AuthSessionGate()
+      $0.networkSession = stubbedSession()
+      $0.keychainClient.save = { _, _ in }
+      $0.keychainClient.load = { _ in nil }
+      $0.keychainClient.delete = { _ in }
+    } operation: {
+      try await operation()
+    }
+  }
+
   @Test func signInExchangesCredentialsAndStoresTheTokens() async throws {
     let saves = try await signIn()
     let requests = AuthStubProtocol.requests
@@ -281,6 +325,66 @@ private final class AuthStubProtocol: URLProtocol {
         keychainSave: { _, _ in throw URLError(.badURL) }
       )
     }
+  }
+
+  // MARK: Sign-up and password-reset request
+
+  @Test func signUpSendsTheExpectedRequestAndLeavesTheSessionAlone() async throws {
+    try await unauthenticated(Self.signUpSuccessStub) {
+      try await SessionClient.liveValue.signUp("Test User", "newuser@example.com", "secret")
+    }
+    let requests = AuthStubProtocol.requests
+
+    #expect(requests.count == 1)
+    #expect(requests.first?.httpMethod == "POST")
+    #expect(requests.first?.path == "/api/v1/auth/sign-up")
+    let body = String(decoding: requests.first?.body ?? Data(), as: UTF8.self)
+    #expect(body.contains(#""name":"Test User""#))
+    #expect(body.contains(#""email":"newuser@example.com""#))
+    #expect(body.contains(#""password":"secret""#))
+    #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
+    #expect(requests.first?.authorizationHeader == nil)
+
+    // Signing up does not sign in: no credential write, no published session.
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session == nil)
+  }
+
+  @Test func signUp400ThrowsABadResponseWhoseBodyAPIErrorBodyDecodes() async throws {
+    do {
+      try await unauthenticated(
+        AuthStubProtocol.Stub(
+          statusCode: 400,
+          body: Data(#"{"error":"User already exists"}"#.utf8)
+        )
+      ) {
+        try await SessionClient.liveValue.signUp("Test User", "taken@example.com", "secret")
+      }
+      Issue.record("Expected the 400 to throw, but signUp succeeded")
+    } catch let error as HTTPRequestClient.Error {
+      guard case .badResponse(_, 400, _) = error else {
+        Issue.record("Expected a 400 badResponse, got \(error)")
+        return
+      }
+      #expect(APIErrorBody.from(error)?.error == "User already exists")
+    }
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session == nil)
+  }
+
+  @Test func requestPasswordResetSendsTheExpectedRequest() async throws {
+    try await unauthenticated(Self.passwordResetSuccessStub) {
+      try await SessionClient.liveValue.requestPasswordReset("user@example.com")
+    }
+    let requests = AuthStubProtocol.requests
+
+    #expect(requests.count == 1)
+    #expect(requests.first?.httpMethod == "POST")
+    #expect(requests.first?.path == "/api/v1/auth/forgot-password")
+    let body = String(decoding: requests.first?.body ?? Data(), as: UTF8.self)
+    #expect(body.contains(#""email":"user@example.com""#))
+    #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
+    #expect(requests.first?.authorizationHeader == nil)
   }
 
   @Test func signOutRevokesTheRefreshTokenThenDestroysTheSession() async throws {
