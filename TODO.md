@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Put the sign-out gate back in the documented refresh wiring
 
-- [ ] **Gap.** The "Setting Up JWT Authentication" section of
+- [x] **Gap.** The "Setting Up JWT Authentication" section of
       `docs/api-clients.md` says to copy its `JWTAuthClient` sample, but the
       sample predates `AuthSessionGate`. The shipped `refresh` closure in
       `Core/Sources/Clients/JWTAuthClient+Live.swift` resolves
