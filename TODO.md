@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Move the cache database out of Documents and split it by configuration
 
-- [ ] **Gap.** `appDatabase()` in `Core/Sources/Database/Connection.swift`
+- [x] **Gap.** `appDatabase()` in `Core/Sources/Database/Connection.swift`
       opens the live database at `URL.documentsDirectory/db.sqlite`. That
       database is a regenerable, user-scoped cache (see
       `docs/local-caching.md` and `UserCacheReset`). Documents is the

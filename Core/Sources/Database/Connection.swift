@@ -29,10 +29,25 @@ public func appDatabase() throws -> any DatabaseWriter {
   if context == .preview {
     database = try DatabaseQueue(configuration: configuration)
   } else {
-    let path =
-      context == .live
-      ? URL.documentsDirectory.appending(component: "db.sqlite").path()
-      : URL.temporaryDirectory.appending(component: "\(UUID().uuidString)-db.sqlite").path()
+    let path: String
+    if context == .live {
+      let folder = URL.applicationSupportDirectory
+        .appending(component: "Database", directoryHint: .isDirectory)
+      try FileManager.default.createDirectory(
+        at: folder,
+        withIntermediateDirectories: true
+      )
+      try (folder as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
+      #if DEBUG
+        let file = folder.appending(component: "cache-debug.sqlite")
+      #else
+        let file = folder.appending(component: "cache.sqlite")
+      #endif
+      path = file.path()
+    } else {
+      path = URL.temporaryDirectory
+        .appending(component: "\(UUID().uuidString)-db.sqlite").path()
+    }
     logger.info("Open \(path)")
     database = try DatabasePool(path: path, configuration: configuration)
   }

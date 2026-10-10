@@ -146,8 +146,19 @@ public func appDatabase() throws -> any DatabaseWriter {
 
   switch context {
   case .live:
-    let path = URL.documentsDirectory.appending(component: "db.sqlite").path()
-    database = try DatabasePool(path: path, configuration: configuration)
+    let folder = URL.applicationSupportDirectory
+      .appending(component: "Database", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(
+      at: folder,
+      withIntermediateDirectories: true
+    )
+    try (folder as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
+    #if DEBUG
+      let file = folder.appending(component: "cache-debug.sqlite")
+    #else
+      let file = folder.appending(component: "cache.sqlite")
+    #endif
+    database = try DatabasePool(path: file.path(), configuration: configuration)
 
   case .preview:
     database = try DatabaseQueue(configuration: configuration)
