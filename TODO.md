@@ -7,40 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Move the cache database out of Documents and split it by configuration
-
-- [x] **Gap.** `appDatabase()` in `Core/Sources/Database/Connection.swift`
-      opens the live database at `URL.documentsDirectory/db.sqlite`. That
-      database is a regenerable, user-scoped cache (see
-      `docs/local-caching.md` and `UserCacheReset`). Documents is the
-      user-facing folder: it is backed up to iCloud, and it becomes visible
-      in Files as soon as a cloner enables file sharing. Debug and Release
-      also share the one file. On a device that runs both the `Indigo` and
-      `Indigo Release` schemes, the DEBUG-only
-      `eraseDatabaseOnSchemaChange` can wipe the Release build's cache, and a
-      Debug schema in progress can leak into Release runs.
-- **Desired behavior.** The live cache lives under Application Support, out
-  of the user's Documents, with a separate file per build configuration.
-- **Scope.** In the `.live` branch of `appDatabase()`, resolve
-  `URL.applicationSupportDirectory`, create it with
-  `FileManager.default.createDirectory(at:withIntermediateDirectories: true)`
-  (it does not exist on first launch), and open `cache-debug.sqlite` under
-  `#if DEBUG` and `cache.sqlite` otherwise. Leave the preview (in-memory) and
-  test (per-test temp file) branches, the migrator, and the trace setup
-  untouched. Make it a clean cutover with no migration from the old
-  Documents path; the template has no installed base. Update the `.live`
-  path in the `appDatabase()` sample in `docs/local-caching.md` to match.
-- **Dependencies.** None.
-- **Acceptance.** `Connection.swift` and `docs/local-caching.md` have no
-  `documentsDirectory` reference left. The live path is under Application
-  Support, and the file name differs between Debug and Release. The
-  directory is created before `DatabasePool` opens. Existing `CoreTests` and
-  `RootFeatureTests` stay unchanged, because they run under the test
-  context.
-- **Validation.** `grep -rn documentsDirectory Core docs` returns nothing,
-  then `mise exec -- tuist generate --no-open` and `mise exec -- tuist build`.
-
-### 2. Adopt Xcode's recommended build settings in the App xcconfigs
+### 1. Adopt Xcode's recommended build settings in the App xcconfigs
 
 - [ ] **Gap.** The framework projects get `ENABLE_MODULE_VERIFIER`,
       `MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS` and
@@ -68,6 +35,48 @@ do not rely on a simulator run.
 - **Validation.** `grep -cE '^(ENABLE_MODULE_VERIFIER|MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS|REGISTER_APP_GROUPS|STRING_CATALOG_GENERATE_SYMBOLS)=' Configs/Debug.xcconfig Configs/Release.xcconfig`
   reports 4 for each file, then `mise exec -- tuist generate --no-open` and
   `mise exec -- tuist build`.
+
+### 2. Put the sign-out gate back in the documented refresh wiring
+
+- [ ] **Gap.** The "Setting Up JWT Authentication" section of
+      `docs/api-clients.md` says to copy its `JWTAuthClient` sample, but the
+      sample predates `AuthSessionGate`. The shipped `refresh` closure in
+      `Core/Sources/Clients/JWTAuthClient+Live.swift` resolves
+      `@Dependency(\.authSessionGate)` and calls
+      `await gate.stagePublish(newRefresh:sourceRefresh:)` before returning
+      the new tokens; the sample does neither and returns `AuthTokens`
+      inline. The "Session Lifecycle" bullet further down says that the
+      `refresh` closure records the publish it is about to hand back, which
+      is the call the sample leaves out. A cloner who copies the sample gets
+      a refresh that the gated `authTokensClient` cannot veto, so a refresh
+      that lands mid-sign-out can sign the user back in with a refresh token
+      that sign-out never revoked. Separately, the "Making Authenticated
+      Requests" example calls `Path("api", "v1", "user", "profile")`, but the
+      authenticated profile route the paired backend serves is
+      `GET /api/v1/account/profile`.
+- **Desired behavior.** The documented refresh wiring matches the shipped
+  file line for line in its logic, and the authenticated-request example
+  names a route the backend actually serves.
+- **Scope.** Only `docs/api-clients.md`. In the JWT setup sample, add
+  `@Dependency(\.authSessionGate) var gate`, bind the result to `newTokens`,
+  call `await gate.stagePublish(newRefresh: newTokens.refresh, sourceRefresh: tokens.refresh)`
+  and return `newTokens`, with a one-line comment pointing at
+  `AuthSessionGate`, exactly as the shipped closure does. Add one sentence
+  after the sample saying that the `stagePublish` call is required for as
+  long as `.gated` is installed. Change the authenticated-request path to
+  `Path("api", "v1", "account", "profile")`. Leave the generic `stacks`,
+  `items`, and `games` examples alone. Do not change any Swift file.
+- **Dependencies.** None.
+- **Acceptance.** The sample's `refresh` closure resolves the same three
+  dependencies as `JWTAuthClient+Live.swift`
+  (`httpRequestClient`, `networkSession`, `authSessionGate`) and calls
+  `stagePublish` before returning. `docs/api-clients.md` has no
+  `"user", "profile"` path left. No other file changes.
+- **Validation.** `grep -c stagePublish docs/api-clients.md` reports at least
+  1, and `grep -n '"user", "profile"' docs/api-clients.md` returns nothing.
+  Compare the sample's `refresh` closure against
+  `Core/Sources/Clients/JWTAuthClient+Live.swift` by eye. No build is needed
+  for a docs-only change.
 
 ## Completed
 
@@ -99,3 +108,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Point DEBUG builds at the local backend dev server
 - [x] Bump the Tuist pin to 4.208.0
 - [x] Ship an app privacy manifest
+- [x] Move the cache database into Application Support and split it by configuration
