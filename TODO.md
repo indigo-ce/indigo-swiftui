@@ -7,49 +7,7 @@ scoped to one focused pull request. Validate Swift changes with
 `mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
 do not rely on a simulator run.
 
-### 1. Put the sign-out gate back in the documented refresh wiring
-
-- [x] **Gap.** The "Setting Up JWT Authentication" section of
-      `docs/api-clients.md` says to copy its `JWTAuthClient` sample, but the
-      sample predates `AuthSessionGate`. The shipped `refresh` closure in
-      `Core/Sources/Clients/JWTAuthClient+Live.swift` resolves
-      `@Dependency(\.authSessionGate)` and calls
-      `await gate.stagePublish(newRefresh:sourceRefresh:)` before returning
-      the new tokens; the sample does neither and returns `AuthTokens`
-      inline. The "Session Lifecycle" bullet further down says that the
-      `refresh` closure records the publish it is about to hand back, which
-      is the call the sample leaves out. A cloner who copies the sample gets
-      a refresh that the gated `authTokensClient` cannot veto, so a refresh
-      that lands mid-sign-out can sign the user back in with a refresh token
-      that sign-out never revoked. Separately, the "Making Authenticated
-      Requests" example calls `Path("api", "v1", "user", "profile")`, but the
-      authenticated profile route the paired backend serves is
-      `GET /api/v1/account/profile`.
-- **Desired behavior.** The documented refresh wiring matches the shipped
-  file line for line in its logic, and the authenticated-request example
-  names a route the backend actually serves.
-- **Scope.** Only `docs/api-clients.md`. In the JWT setup sample, add
-  `@Dependency(\.authSessionGate) var gate`, bind the result to `newTokens`,
-  call `await gate.stagePublish(newRefresh: newTokens.refresh, sourceRefresh: tokens.refresh)`
-  and return `newTokens`, with a one-line comment pointing at
-  `AuthSessionGate`, exactly as the shipped closure does. Add one sentence
-  after the sample saying that the `stagePublish` call is required for as
-  long as `.gated` is installed. Change the authenticated-request path to
-  `Path("api", "v1", "account", "profile")`. Leave the generic `stacks`,
-  `items`, and `games` examples alone. Do not change any Swift file.
-- **Dependencies.** None.
-- **Acceptance.** The sample's `refresh` closure resolves the same three
-  dependencies as `JWTAuthClient+Live.swift`
-  (`httpRequestClient`, `networkSession`, `authSessionGate`) and calls
-  `stagePublish` before returning. `docs/api-clients.md` has no
-  `"user", "profile"` path left. No other file changes.
-- **Validation.** `grep -c stagePublish docs/api-clients.md` reports at least
-  1, and `grep -n '"user", "profile"' docs/api-clients.md` returns nothing.
-  Compare the sample's `refresh` closure against
-  `Core/Sources/Clients/JWTAuthClient+Live.swift` by eye. No build is needed
-  for a docs-only change.
-
-### 2. Give `SessionClient` sign-up and password-reset request operations
+### 1. Give `SessionClient` sign-up and password-reset request operations
 
 - [ ] **Gap.** `Core/Sources/Clients/SessionClient.swift` covers only
       `signIn` and `signOut`. The paired backend also serves the two other
@@ -128,3 +86,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Ship an app privacy manifest
 - [x] Move the cache database into Application Support and split it by configuration
 - [x] Adopt Xcode's recommended build settings in the App xcconfigs
+- [x] Put the sign-out gate in the documented refresh wiring
