@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Drop the `xctest-dynamic-overlay` pin from `Package.swift`
 
-- [ ] **Gap.** `Package.swift` declares
+- [x] **Gap.** `Package.swift` declares
       `xctest-dynamic-overlay` directly, held at `"1.11.0"..<"1.13.0"`, to
       keep a forwarded `IssueReporting` product from appearing twice in the
       graph (tuist/tuist#12846). That workaround no longer has anything to

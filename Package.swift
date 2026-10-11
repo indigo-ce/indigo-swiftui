@@ -70,7 +70,6 @@
     "IdentifiedCollections",
     "InternalCollectionsUtilities",
     "IssueReporting",
-    "IssueReportingPackageSupport",
     "JWTAuth",
     "JWTDecode",
     "Logging",
@@ -87,8 +86,7 @@
     "SwiftNavigation",
     "SwiftUINavigation",
     "UIKitNavigation",
-    "UIKitNavigationShim",
-    "XCTestDynamicOverlay"
+    "UIKitNavigationShim"
   ])
 
   // Swift macro executables cannot link a dynamic framework: force the
@@ -127,14 +125,7 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.11.2"),
     .package(url: "https://github.com/pointfreeco/swift-perception", from: "2.0.12"),
     .package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
-    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2"),
-    // Held below 1.13. From 1.13 the IssueReporting product is forwarded to
-    // swift-issue-reporting, which duplicates it in the graph and trips
-    // Tuist's false-circular-dependency error (tuist/tuist#12846).
-    .package(
-      url: "https://github.com/pointfreeco/xctest-dynamic-overlay",
-      "1.11.0"..<"1.13.0"
-    )
+    .package(url: "https://github.com/pointfreeco/swift-structured-queries", from: "0.39.2")
   ],
   swiftLanguageModes: [.v6]
 )
