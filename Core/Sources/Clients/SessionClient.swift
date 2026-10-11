@@ -11,8 +11,16 @@ private let logger = Logger(subsystem: "Indigo", category: "SessionClient")
 
 // MARK: - Live implementation
 
-/// The two session lifecycle operations the template ships: sign-in and
-/// sign-out.
+/// The session lifecycle operations the template ships: sign-in, sign-out,
+/// and the two unauthenticated account-entry routes served alongside them —
+/// sign-up and password-reset request.
+///
+/// Signing up does not sign in: the token the sign-up route answers with is a
+/// server-side web session token, not the JWT pair `authTokensClient` stores,
+/// so a new account must still go through `signIn` before the app holds a
+/// session. Neither new operation reads or writes stored credentials; request
+/// errors propagate untouched so callers can surface the server's message
+/// through `APIErrorBody.from(error)`.
 ///
 /// Sign-out runs in a fixed order: revoke the refresh token on the server on
 /// a **best-effort** basis, then destroy the local credentials. A revoke
@@ -38,6 +46,9 @@ private let logger = Logger(subsystem: "Indigo", category: "SessionClient")
 public struct SessionClient: Sendable {
   public var signIn: @Sendable (_ email: String, _ password: String) async throws -> Void
   public var signOut: @Sendable () async throws -> Void
+  public var signUp:
+    @Sendable (_ name: String, _ email: String, _ password: String) async throws -> Void
+  public var requestPasswordReset: @Sendable (_ email: String) async throws -> Void
 }
 
 extension SessionClient: DependencyKey {
@@ -99,11 +110,51 @@ extension SessionClient: DependencyKey {
       }
 
       try await authTokensClient.destroy()
+    },
+    signUp: { name, email, password in
+      @Dependency(\.apiClient) var apiClient
+      @Dependency(\.networkSession) var networkSession
+
+      // `send`, not `sendAuthenticated`: there is no session yet. The route
+      // takes a JSON body and answers 200 with `{user, token}` — but that
+      // token is a server-side web session token, not the JWT pair
+      // `authTokensClient` stores, so this closure deliberately never touches
+      // it or the stored credentials: signing up does not sign in, and the
+      // account must still go through `signIn`. No `callbackURL` is sent, so
+      // the backend default applies. A 400 (malformed body, taken email)
+      // rethrows; read it with `APIErrorBody.from(error)`.
+      let _: SignUpResponse = try await apiClient.send(
+        decoder: .api,
+        urlSession: networkSession
+      ) {
+        Path("api", "v1", "auth", "sign-up")
+        post(SignUpRequest(name: name, email: email, password: password), encoder: .api)
+      }.value
+    },
+    requestPasswordReset: { email in
+      @Dependency(\.apiClient) var apiClient
+      @Dependency(\.networkSession) var networkSession
+
+      // Asks the server to send the password-reset email for `email`. No
+      // `redirectTo` is sent, so the backend default applies. Errors propagate
+      // untouched; nothing about the stored session is read or written.
+      let _: ForgotPasswordResponse = try await apiClient.send(
+        decoder: .api,
+        urlSession: networkSession
+      ) {
+        Path("api", "v1", "auth", "forgot-password")
+        post(ForgotPasswordRequest(email: email), encoder: .api)
+      }.value
     }
   )
 
   public static var previewValue: SessionClient {
-    SessionClient(signIn: { _, _ in }, signOut: {})
+    SessionClient(
+      signIn: { _, _ in },
+      signOut: {},
+      signUp: { _, _, _ in },
+      requestPasswordReset: { _ in }
+    )
   }
 
   public static var testValue: SessionClient {
@@ -155,6 +206,30 @@ func revokeRefreshToken(_ refresh: String) async {
 private struct SignInResponse: Decodable, Sendable {
   let accessToken: String
   let refreshToken: String
+}
+
+// MARK: - Sign-up endpoint models
+
+// The sign-up response shape. Keep it private to this file, like the other
+// endpoint models here. The backend sends `user` and `token`, neither of
+// which this operation uses — the token is a web session token, not the JWT
+// pair `authTokensClient` stores — so nothing is decoded.
+private struct SignUpResponse: Decodable, Sendable {}
+
+private struct SignUpRequest: Encodable, Sendable {
+  let name: String
+  let email: String
+  let password: String
+}
+
+// MARK: - Forgot-password endpoint models
+
+// The forgot-password response shape: `{status, message}`. Neither field is
+// used, so nothing is decoded.
+private struct ForgotPasswordResponse: Decodable, Sendable {}
+
+private struct ForgotPasswordRequest: Encodable, Sendable {
+  let email: String
 }
 
 // MARK: - Revoke endpoint models

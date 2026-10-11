@@ -351,6 +351,17 @@ Tokens live in two layers, and the library keeps them in lockstep:
   through the gated `authTokensClient.save` — that save is what publishes the
   session on `@Shared(.authSession)`. A failed exchange stores nothing and
   rethrows; read the server's message with `APIErrorBody.from(error)`.
+- Sign-up and password-reset requests go through
+  `@Dependency(\.sessionClient).signUp(name, email, password)` and
+  `.requestPasswordReset(email)`. Both are plain unauthenticated requests
+  built with the shared transport and coders, and neither touches the stored
+  credentials or the published session. Signing up does **not** create a
+  session — the token the route answers with is a server-side web session
+  token, not the JWT pair `authTokensClient` stores — so a successful
+  `signUp` must be followed by `signIn` before the app holds a session.
+  Request errors (including the 400s a taken email or weak password
+  produces) propagate untouched; read them with `APIErrorBody.from(error)`.
+  See `Core/Sources/Clients/SessionClient.swift`.
 - Sign-out goes through `@Dependency(\.sessionClient).signOut()` — never a
   bare `authTokensClient.destroy()`. `signOut` first revokes the refresh token
   on the server on a **best-effort** basis (`POST /api/v1/auth/revoke-access`

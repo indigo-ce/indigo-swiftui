@@ -9,7 +9,7 @@ do not rely on a simulator run.
 
 ### 1. Give `SessionClient` sign-up and password-reset request operations
 
-- [ ] **Gap.** `Core/Sources/Clients/SessionClient.swift` covers only
+- [x] **Gap.** `Core/Sources/Clients/SessionClient.swift` covers only
       `signIn` and `signOut`. The paired backend also serves the two other
       unauthenticated account-entry routes an app needs before it holds a
       session: `POST /api/v1/auth/sign-up` (JSON body
