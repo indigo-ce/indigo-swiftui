@@ -12,15 +12,22 @@ private let logger = Logger(subsystem: "Indigo", category: "SessionClient")
 // MARK: - Live implementation
 
 /// The session lifecycle operations the template ships: sign-in, sign-out,
-/// and the two unauthenticated account-entry routes served alongside them —
-/// sign-up and password-reset request.
+/// and the unauthenticated account-entry routes served alongside them —
+/// sign-up, the password-reset request, verification-email resend, and
+/// password-reset redemption.
 ///
 /// Signing up does not sign in: the token the sign-up route answers with is a
 /// server-side web session token, not the JWT pair `authTokensClient` stores,
 /// so a new account must still go through `signIn` before the app holds a
-/// session. Neither new operation reads or writes stored credentials; request
+/// session. Neither operation reads or writes stored credentials; request
 /// errors propagate untouched so callers can surface the server's message
 /// through `APIErrorBody.from(error)`.
+///
+/// When the backend requires email verification, `signIn` answers 401
+/// `Email not verified` — `sendVerificationEmail` re-sends the link so the
+/// account can proceed. The reset token `requestPasswordReset` emails out is
+/// redeemed with `resetPassword`; resetting a password does **not** sign in —
+/// the user still goes through `signIn` with the new password.
 ///
 /// Sign-out runs in a fixed order: revoke the refresh token on the server on
 /// a **best-effort** basis, then destroy the local credentials. A revoke
@@ -49,6 +56,8 @@ public struct SessionClient: Sendable {
   public var signUp:
     @Sendable (_ name: String, _ email: String, _ password: String) async throws -> Void
   public var requestPasswordReset: @Sendable (_ email: String) async throws -> Void
+  public var sendVerificationEmail: @Sendable (_ email: String) async throws -> Void
+  public var resetPassword: @Sendable (_ token: String, _ newPassword: String) async throws -> Void
 }
 
 extension SessionClient: DependencyKey {
@@ -145,6 +154,40 @@ extension SessionClient: DependencyKey {
         Path("api", "v1", "auth", "forgot-password")
         post(ForgotPasswordRequest(email: email), encoder: .api)
       }.value
+    },
+    sendVerificationEmail: { email in
+      @Dependency(\.apiClient) var apiClient
+      @Dependency(\.networkSession) var networkSession
+
+      // `send`, not `sendAuthenticated`: there may be no session yet — this
+      // is exactly the resend path for a sign-in that answered 401 `Email not
+      // verified`. No `callbackURL` is sent, so the backend default applies.
+      // Errors propagate untouched; nothing about the stored session is read
+      // or written.
+      let _: SendVerificationEmailResponse = try await apiClient.send(
+        decoder: .api,
+        urlSession: networkSession
+      ) {
+        Path("api", "v1", "auth", "send-verification-email")
+        post(SendVerificationEmailRequest(email: email), encoder: .api)
+      }.value
+    },
+    resetPassword: { token, newPassword in
+      @Dependency(\.apiClient) var apiClient
+      @Dependency(\.networkSession) var networkSession
+
+      // Redeems the token `requestPasswordReset` emailed out. `send`, not
+      // `sendAuthenticated`: redeeming a reset token must work before any
+      // session exists, and it does not create one either — the user still
+      // goes through `signIn` with the new password. Errors propagate
+      // untouched; nothing about the stored session is read or written.
+      let _: ResetPasswordResponse = try await apiClient.send(
+        decoder: .api,
+        urlSession: networkSession
+      ) {
+        Path("api", "v1", "auth", "reset-password")
+        post(ResetPasswordRequest(newPassword: newPassword, token: token), encoder: .api)
+      }.value
     }
   )
 
@@ -153,7 +196,9 @@ extension SessionClient: DependencyKey {
       signIn: { _, _ in },
       signOut: {},
       signUp: { _, _, _ in },
-      requestPasswordReset: { _ in }
+      requestPasswordReset: { _ in },
+      sendVerificationEmail: { _ in },
+      resetPassword: { _, _ in }
     )
   }
 
@@ -230,6 +275,27 @@ private struct ForgotPasswordResponse: Decodable, Sendable {}
 
 private struct ForgotPasswordRequest: Encodable, Sendable {
   let email: String
+}
+
+// MARK: - Verification-email endpoint models
+
+// The verification-email response shape: `{status}`. Not used, so nothing is
+// decoded. Keep them private to this file, like the other endpoint models here.
+private struct SendVerificationEmailResponse: Decodable, Sendable {}
+
+private struct SendVerificationEmailRequest: Encodable, Sendable {
+  let email: String
+}
+
+// MARK: - Password-reset endpoint models
+
+// The reset-password response shape: `{status}`. Not used, so nothing is
+// decoded. Keep them private to this file, like the other endpoint models here.
+private struct ResetPasswordResponse: Decodable, Sendable {}
+
+private struct ResetPasswordRequest: Encodable, Sendable {
+  let newPassword: String
+  let token: String
 }
 
 // MARK: - Revoke endpoint models

@@ -124,6 +124,13 @@ private final class AuthStubProtocol: URLProtocol {
     body: Data(#"{"status":true,"message":"Reset link sent"}"#.utf8)
   )
 
+  /// The shape the backend sends on verification-email resend and reset
+  /// redemption: just the better-auth `{status}` flag.
+  private static let statusSuccessStub = AuthStubProtocol.Stub(
+    statusCode: 200,
+    body: Data(#"{"status":true}"#.utf8)
+  )
+
   private func stubbedSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [AuthStubProtocol.self]
@@ -415,6 +422,30 @@ private final class AuthStubProtocol: URLProtocol {
     #expect(AuthStubProtocol.requests.count == 1)
     #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
     #expect(resetInteractions.value == KeychainInteractions())
+
+    let verificationInteractions = LockIsolated(KeychainInteractions())
+    try await unauthenticated(
+      Self.statusSuccessStub,
+      seedTokens: true,
+      into: verificationInteractions
+    ) {
+      try await SessionClient.liveValue.sendVerificationEmail("user@example.com")
+    }
+    #expect(AuthStubProtocol.requests.count == 1)
+    #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
+    #expect(verificationInteractions.value == KeychainInteractions())
+
+    let redeemInteractions = LockIsolated(KeychainInteractions())
+    try await unauthenticated(
+      Self.statusSuccessStub,
+      seedTokens: true,
+      into: redeemInteractions
+    ) {
+      try await SessionClient.liveValue.resetPassword("reset-token", "new-secret")
+    }
+    #expect(AuthStubProtocol.requests.count == 1)
+    #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
+    #expect(redeemInteractions.value == KeychainInteractions())
   }
 
   @Test func signUp400ThrowsABadResponseWhoseBodyAPIErrorBodyDecodes() async throws {
@@ -458,6 +489,73 @@ private final class AuthStubProtocol: URLProtocol {
     #expect(body.contains(#""email":"user@example.com""#))
     #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
     #expect(requests.first?.authorizationHeader == nil)
+    #expect(interactions.value == KeychainInteractions())
+  }
+
+  // MARK: Verification email and password reset
+
+  @Test func sendVerificationEmailSendsTheExpectedRequest() async throws {
+    let interactions = LockIsolated(KeychainInteractions())
+    try await unauthenticated(Self.statusSuccessStub, into: interactions) {
+      try await SessionClient.liveValue.sendVerificationEmail("unverified@example.com")
+    }
+    let requests = AuthStubProtocol.requests
+
+    #expect(requests.count == 1)
+    #expect(requests.first?.httpMethod == "POST")
+    #expect(requests.first?.path == "/api/v1/auth/send-verification-email")
+    // Only `email` — no `callbackURL`, so the backend default applies.
+    let body = try JSONSerialization.jsonObject(with: requests.first?.body ?? Data())
+    #expect(body as? [String: String] == ["email": "unverified@example.com"])
+    #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
+    #expect(requests.first?.authorizationHeader == nil)
+    #expect(interactions.value == KeychainInteractions())
+  }
+
+  @Test func resetPasswordSendsTheExpectedRequest() async throws {
+    let interactions = LockIsolated(KeychainInteractions())
+    try await unauthenticated(Self.statusSuccessStub, into: interactions) {
+      try await SessionClient.liveValue.resetPassword("reset-token", "new-secret")
+    }
+    let requests = AuthStubProtocol.requests
+
+    #expect(requests.count == 1)
+    #expect(requests.first?.httpMethod == "POST")
+    #expect(requests.first?.path == "/api/v1/auth/reset-password")
+    // Exactly `newPassword` and `token`, nothing else.
+    let body = try JSONSerialization.jsonObject(with: requests.first?.body ?? Data())
+    #expect(
+      (body as? [String: String]) == ["newPassword": "new-secret", "token": "reset-token"]
+    )
+    #expect(requests.first?.contentTypeHeader == "application/json; charset=utf-8")
+    #expect(requests.first?.authorizationHeader == nil)
+    #expect(interactions.value == KeychainInteractions())
+  }
+
+  @Test func resetPassword400ThrowsABadResponseWhoseBodyAPIErrorBodyDecodes() async throws {
+    let interactions = LockIsolated(KeychainInteractions())
+    do {
+      try await unauthenticated(
+        AuthStubProtocol.Stub(
+          statusCode: 400,
+          body: Data(#"{"error":"Invalid or expired reset token"}"#.utf8)
+        ),
+        into: interactions
+      ) {
+        try await SessionClient.liveValue.resetPassword("bad-token", "new-secret")
+      }
+      Issue.record("Expected the 400 to throw, but resetPassword succeeded")
+    } catch let error as HTTPRequestClient.Error {
+      guard case .badResponse(_, 400, _) = error else {
+        Issue.record("Expected a 400 badResponse, got \(error)")
+        return
+      }
+      #expect(APIErrorBody.from(error)?.error == "Invalid or expired reset token")
+    }
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session == nil)
+    // The recorder is passed in, so whatever resetPassword touched before the
+    // 400 threw is still visible here.
     #expect(interactions.value == KeychainInteractions())
   }
 
