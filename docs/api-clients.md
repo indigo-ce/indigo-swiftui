@@ -361,7 +361,17 @@ Tokens live in two layers, and the library keeps them in lockstep:
   `signUp` must be followed by `signIn` before the app holds a session.
   Request errors (including the 400s a taken email or weak password
   produces) propagate untouched; read them with `APIErrorBody.from(error)`.
-  See `Core/Sources/Clients/SessionClient.swift`.
+  Two more unauthenticated account-entry operations complete the set:
+  `.sendVerificationEmail(email)` re-sends the verification link
+  (`POST /api/v1/auth/send-verification-email`) — the operation to offer
+  when `signIn` answers 401 `Email not verified` — and
+  `.resetPassword(token, newPassword)` redeems the reset token
+  `requestPasswordReset` emailed out (`POST /api/v1/auth/reset-password`).
+  Resetting a password does **not** create a session: the user still goes
+  through `signIn` with the new password. Like `signUp`, neither operation
+  touches the stored credentials or the published session, and request
+  errors propagate untouched. See
+  `Core/Sources/Clients/SessionClient.swift`.
 - Sign-out goes through `@Dependency(\.sessionClient).signOut()` — never a
   bare `authTokensClient.destroy()`. `signOut` first revokes the refresh token
   on the server on a **best-effort** basis (`POST /api/v1/auth/revoke-access`

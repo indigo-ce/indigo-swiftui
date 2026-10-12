@@ -11,7 +11,7 @@ do not rely on a simulator run.
 
 ### 1. Give `SessionClient` verification-email and password-reset operations
 
-- [ ] **Gap.** The backend serves two more unauthenticated account-entry
+- [x] **Gap.** The backend serves two more unauthenticated account-entry
       routes that `SessionClient` (`Core/Sources/Clients/SessionClient.swift`)
       does not cover:
       `POST /api/v1/auth/send-verification-email` (`{email, callbackURL?}` →
