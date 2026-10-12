@@ -9,44 +9,54 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
-### 1. Drop the `xctest-dynamic-overlay` pin from `Package.swift`
+### 1. Give `SessionClient` verification-email and password-reset operations
 
-- [x] **Gap.** `Package.swift` declares
-      `xctest-dynamic-overlay` directly, held at `"1.11.0"..<"1.13.0"`, to
-      keep a forwarded `IssueReporting` product from appearing twice in the
-      graph (tuist/tuist#12846). That workaround no longer has anything to
-      protect: the resolved releases of the graph's packages depend on
-      `swift-issue-reporting` (resolved at 2.1.1 in `Package.resolved`)
-      instead, so the root manifest should be the only thing still asking
-      for `xctest-dynamic-overlay`.
-      The pin is now the only thing that puts a second, legacy copy of
-      `IssueReporting` (1.11.0) in `Package.resolved`. The pinned package and
-      the `XCTestDynamicOverlay` entry in `productTypes` are dead weight that
-      a cloner has to understand before touching dependencies.
-- **Desired behavior.** The dependency graph carries one issue-reporting
-  package, `swift-issue-reporting`, and `Package.swift` declares no
-  package or product type that nothing in the graph uses.
-- **Scope.** In `Package.swift`: delete the `xctest-dynamic-overlay`
-  `.package(...)` entry and its three-line "Held below 1.13" comment; delete
-  `"XCTestDynamicOverlay"` from the `frameworkProductTypes([...])` list.
-  Keep `"IssueReporting"`. Keep `"IssueReportingPackageSupport"` only if
-  the resolved `swift-issue-reporting` manifest (under `Tuist/.build/checkouts/`
-  after `tuist install`) still declares a product with that name;
-  otherwise delete it too. Re-resolve so `Package.resolved` drops the
-  `xctest-dynamic-overlay` pin. No version bumps of other packages beyond
-  what re-resolution forces, and no other file.
+- [ ] **Gap.** The backend serves two more unauthenticated account-entry
+      routes that `SessionClient` (`Core/Sources/Clients/SessionClient.swift`)
+      does not cover:
+      `POST /api/v1/auth/send-verification-email` (`{email, callbackURL?}` →
+      `{status}`) and `POST /api/v1/auth/reset-password`
+      (`{newPassword, token}` → `{status}`). When the backend requires email
+      verification, sign-in answers 401 `Email not verified`, and a cloner
+      has no shipped way to resend the link; likewise the reset token that
+      `requestPasswordReset` emails out has no client operation to redeem it.
+      Each cloner would hand-build these requests and has to rediscover that
+      they must not touch the stored session.
+- **Desired behavior.** `SessionClient` covers every unauthenticated auth
+  route the backend serves, and the two new ones follow the same contract
+  as `signUp` and `requestPasswordReset`: plain `apiClient.send` (not
+  `sendAuthenticated`) on `networkSession` with the `.api` coders, no read
+  or write of stored credentials or `@Shared(.authSession)`, and request
+  errors rethrown untouched so callers read them with
+  `APIErrorBody.from(error)`. Resetting a password does not sign in.
+- **Scope.** In `SessionClient.swift`: add
+  `sendVerificationEmail: @Sendable (_ email: String) async throws -> Void`
+  and
+  `resetPassword: @Sendable (_ token: String, _ newPassword: String) async throws -> Void`;
+  implement both in `liveValue` with file-private request models
+  (`{email}` and `{newPassword, token}`; no `callbackURL`, so the backend
+  default applies) and empty file-private `Decodable` response structs, the
+  way `ForgotPasswordResponse` is; add no-op closures to `previewValue`;
+  extend the type's doc comment. In `Core/Tests/SessionClientTests.swift`,
+  reuse the `unauthenticated(_:seedTokens:into:operation:)` helper. In
+  `docs/api-clients.md`, extend the sign-up/password-reset bullet in the
+  authentication section to name both operations, their routes, and that
+  `resetPassword` does not create a session. No UI, no deep-link handling,
+  no other file.
 - **Dependencies.** None.
-- **Acceptance.** `Package.swift` and `Package.resolved` contain no
-  `xctest-dynamic-overlay`; `Package.resolved` still pins
-  `swift-issue-reporting` at 2.x; `productTypes` lists only products the
-  graph vends.
-- **Validation.** `mise exec -- tuist install`, then
-  `grep -c xctest-dynamic-overlay Package.swift Package.resolved` reports
-  0 for both. If `tuist install` still resolves `xctest-dynamic-overlay`, a
-  transitive package depends on it: stop and record which one here instead
-  of reinstating a pin. Then `mise exec -- tuist generate --no-open` (it
-  must not raise the duplicate-product/circular-dependency error) and
-  `mise exec -- tuist build --platform ios`.
+- **Acceptance.** Tests prove: each operation sends `POST` to its path with
+  the expected JSON body (`sendVerificationEmail` sends only `email`;
+  `resetPassword` sends exactly `newPassword` and `token`); a 200 stub with
+  the backend's `{"status":true}` body succeeds; with a seeded session,
+  neither operation records any keychain save, load, or delete and the
+  published session is unchanged; a 400 stub on `resetPassword` throws an
+  error that `APIErrorBody.from(error)` decodes. The existing suite still
+  passes.
+- **Validation.** `mise exec -- tuist generate --no-open`, then
+  `mise exec -- tuist build --platform ios`. The tests run headlessly with
+  `mise exec -- tuist test --platform macos` (no simulator); if that is not
+  possible in the build environment, say in the PR that only the build was
+  verified and CI's iOS test job is the proof.
 
 ## Completed
 
@@ -82,3 +92,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Adopt Xcode's recommended build settings in the App xcconfigs
 - [x] Put the sign-out gate in the documented refresh wiring
 - [x] Give `SessionClient` sign-up and password-reset request operations
+- [x] Drop the `xctest-dynamic-overlay` pin from `Package.swift`
