@@ -11,7 +11,7 @@ do not rely on a simulator run.
 
 ### 1. Add an `AuthFeature` module with sign-in and sign-up forms
 
-- [ ] **Gap.** `SessionClient` (`Core/Sources/Clients/SessionClient.swift`)
+- [x] **Gap.** `SessionClient` (`Core/Sources/Clients/SessionClient.swift`)
       now covers sign-in, sign-up, sign-out, and the account-entry routes,
       but nothing in the template calls `signIn` or `signUp`: there is no
       screen a user can sign in from, so the shipped session lifecycle
