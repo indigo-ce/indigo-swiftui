@@ -4,12 +4,14 @@
 
 Ordered by priority; where an item depends on an earlier one it says so. Each is
 scoped to one focused pull request. Validate Swift changes with
-`mise exec -- tuist generate --no-open` followed by `mise exec -- tuist build`;
+`mise exec -- tuist generate --no-open` followed by
+`mise exec -- tuist build --platform ios` (the generated project has
+multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
 ### 1. Drop the `xctest-dynamic-overlay` pin from `Package.swift`
 
-- [ ] **Gap.** `Package.swift` declares
+- [x] **Gap.** `Package.swift` declares
       `xctest-dynamic-overlay` directly, held at `"1.11.0"..<"1.13.0"`, to
       keep a forwarded `IssueReporting` product from appearing twice in the
       graph (tuist/tuist#12846). That workaround no longer has anything to
@@ -44,7 +46,7 @@ do not rely on a simulator run.
   transitive package depends on it: stop and record which one here instead
   of reinstating a pin. Then `mise exec -- tuist generate --no-open` (it
   must not raise the duplicate-product/circular-dependency error) and
-  `mise exec -- tuist build`.
+  `mise exec -- tuist build --platform ios`.
 
 ## Completed
 
