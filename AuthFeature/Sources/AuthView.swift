@@ -79,6 +79,9 @@ public struct AuthFeature: Sendable {
         case .signIn:
           guard !state.email.isEmpty, !state.password.isEmpty else { return .none }
           state.isLoading = true
+          // Starting a fresh attempt clears the previous attempt's error, so a
+          // retry that succeeds never shows it next to the confirmation.
+          state.errorMessage = nil
           let email = state.email
           let password = state.password
           return .run { send in
@@ -96,6 +99,7 @@ public struct AuthFeature: Sendable {
             return .none
           }
           state.isLoading = true
+          state.errorMessage = nil
           let name = state.name
           let email = state.email
           let password = state.password
@@ -161,6 +165,9 @@ public struct AuthView: View {
         Text("Sign Up").tag(AuthFeature.State.Mode.signUp)
       }
       .pickerStyle(.segmented)
+      // A response in flight belongs to the mode it was submitted from:
+      // switching modes mid-request would apply its result to the wrong form.
+      .disabled(store.isLoading)
 
       if store.signUpSuccess {
         InlineNotice("Account created. Check your email to verify it, then sign in.")
@@ -168,12 +175,14 @@ public struct AuthView: View {
 
       if store.mode == .signUp {
         TextField("Name", text: $store.name)
+          .disabled(store.isLoading)
           #if os(iOS)
           .textInputAutocapitalization(.words)
           #endif
       }
 
       TextField("Email", text: $store.email)
+        .disabled(store.isLoading)
         #if os(iOS)
         .keyboardType(.emailAddress)
         .textInputAutocapitalization(.never)
@@ -182,6 +191,7 @@ public struct AuthView: View {
         .autocorrectionDisabled()
 
       SecureField("Password", text: $store.password)
+        .disabled(store.isLoading)
         .textContentType(store.mode == .signUp ? .newPassword : .password)
 
       Button {
@@ -200,7 +210,7 @@ public struct AuthView: View {
       .disabled(store.isLoading)
 
       if let errorMessage = store.errorMessage {
-        InlineNotice.error(LocalizedStringKey(errorMessage))
+        InlineNotice.error(verbatim: errorMessage)
       }
     }
   }

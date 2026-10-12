@@ -130,13 +130,14 @@ struct AuthFeatureTests {
 
   @Test
   func submitWhileLoadingSendsNoSecondRequest() async {
-    var gateContinuation: CheckedContinuation<Void, Never>?
+    // A stream gate, not an optional continuation: a yield before the effect
+    // starts consuming is buffered, so the release signal cannot be lost when
+    // the resume happens before the effect reaches its suspension point.
+    let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
     let store = makeStore(
       initialState: AuthFeature.State(email: "user@example.com", password: "secret"),
       signIn: { _, _ in
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-          gateContinuation = continuation
-        }
+        for await _ in gate { break }
       }
     )
 
@@ -146,10 +147,48 @@ struct AuthFeatureTests {
     // Still loading: the second tap is a no-op — no state change, no effect.
     await store.send(.submitButtonTapped)
 
-    gateContinuation?.resume()
+    gateContinuation.yield()
     await store.receive(\.signInResponse) {
       $0.isLoading = false
     }
+  }
+
+  @Test
+  func failedThenSuccessfulSignInRetryClearsError() async {
+    // The first attempt signs in with the wrong password and fails; the user
+    // corrects the field and retries successfully. Only the second call sees
+    // "secret", so a mismatch throws and fails the retry receive below.
+    let store = makeStore(
+      initialState: AuthFeature.State(email: "user@example.com", password: "wrong"),
+      signIn: { _, password in
+        if password != "secret" {
+          throw HTTPRequestClient.Error.badResponse(
+            UUID(), 401, #"{"error":"Invalid email or password"}"#
+          )
+        }
+      }
+    )
+
+    await store.send(.submitButtonTapped) {
+      $0.isLoading = true
+      $0.errorMessage = nil
+    }
+    await store.receive(.failed("Invalid email or password")) {
+      $0.isLoading = false
+      $0.errorMessage = "Invalid email or password"
+    }
+
+    await store.send(.binding(.set(\.password, "secret"))) {
+      $0.password = "secret"
+    }
+    await store.send(.submitButtonTapped) {
+      $0.isLoading = true
+      $0.errorMessage = nil
+    }
+    await store.receive(\.signInResponse) {
+      $0.isLoading = false
+    }
+    #expect(store.state.errorMessage == nil)
   }
 
   @Test
