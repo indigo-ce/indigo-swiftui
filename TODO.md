@@ -111,6 +111,11 @@ do not rely on a simulator run.
   `mise exec -- tuist build --platform macos`; tests via
   `mise exec -- tuist test --platform macos` where possible, otherwise CI.
 
+## Tasker
+
+- [ ] Move from Tuist to new Xcode format (Tasker #37)
+      https://developer.apple.com/documentation/xcode/updating-your-xcode-project-configuration-file-format
+
 ## Completed
 
 Shipped and merged; kept as a short record so the work is not re-proposed.
