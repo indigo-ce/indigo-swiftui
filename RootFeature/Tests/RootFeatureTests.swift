@@ -1,8 +1,10 @@
+import AuthFeature
 import ComposableArchitecture
 import Core
 import Foundation
 import JWTAuth
 import SQLiteData
+import Synchronization
 import Testing
 
 @testable import RootFeature
@@ -395,5 +397,128 @@ extension RootFeatureTests {
 
     let remaining = try await database.read { try Note.fetchAll($0) }
     #expect(remaining.count == 1)
+  }
+}
+
+// MARK: - Account flow
+
+extension RootFeatureTests {
+  /// A store whose session is already `.valid` and whose marker names the
+  /// same account — the signed-in state the account button sees. No `.task`
+  /// is sent, so no launch bootstrap runs. `makeStore` does not set
+  /// `sessionClient` because only the sign-out path ever calls it; tests that
+  /// confirm the dialog override `sessionClient.signOut` per test.
+  private func makeSignedInStore(
+    signOut: (@Sendable () async throws -> Void)? = nil
+  ) -> TestStoreOf<RootFeature> {
+    var state = RootFeature.State()
+    state.authSession = .valid(tokens(sub: "a"))
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = try! appDatabase()
+      $0.notesClient.fetchAll = { [] }
+      if let signOut {
+        $0.sessionClient.signOut = signOut
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    return store
+  }
+
+  private struct SignOutFailed: Error {}
+
+  @Test func accountButtonWithoutSessionPresentsSignIn() async {
+    let store = makeStore { _ in AuthTokens(access: "fresh", refresh: "fresh") }
+
+    await store.send(.notesList(.delegate(.accountButtonTapped)))
+
+    #expect(store.state.auth != nil)
+    #expect(store.state.confirmationDialog == nil)
+  }
+
+  @Test func accountButtonWithSessionPresentsTheSignOutDialog() async {
+    let store = makeSignedInStore()
+
+    await store.send(.notesList(.delegate(.accountButtonTapped)))
+
+    #expect(store.state.confirmationDialog != nil)
+    #expect(store.state.auth == nil)
+  }
+
+  @Test func confirmingSignOutCallsSignOutOnceAndShowsNoAlert() async {
+    let signOutCalls = Mutex(0)
+    let store = makeSignedInStore {
+      signOutCalls.withLock { $0 += 1 }
+    }
+
+    await store.send(.notesList(.delegate(.accountButtonTapped)))
+    await store.send(.confirmationDialog(.presented(.confirmSignOutButtonTapped)))
+    await store.receive(\.signOutResponse)
+
+    #expect(signOutCalls.withLock { $0 } == 1)
+    #expect(store.state.alert == nil)
+  }
+
+  @Test func failedSignOutPresentsTheAlert() async {
+    let store = makeSignedInStore {
+      throw SignOutFailed()
+    }
+
+    await store.send(.notesList(.delegate(.accountButtonTapped)))
+    await store.send(.confirmationDialog(.presented(.confirmSignOutButtonTapped)))
+    await store.receive(\.signOutResponse)
+
+    #expect(store.state.alert != nil)
+  }
+
+  /// A sign-in that keeps the same account still publishes `.valid` — the
+  /// sheet must be dismissed even though the same-`sub` guard then swallows
+  /// the session change.
+  @Test func validSessionDismissesPresentedSignInForTheSameAccount() async {
+    var state = RootFeature.State()
+    state.auth = AuthFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = try! appDatabase()
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionChanged(.valid(tokens(sub: "a"))))
+
+    #expect(store.state.auth == nil)
+  }
+
+  @Test func validSessionDismissesPresentedSignInAndWipesForANewAccount() async throws {
+    let database = try appDatabase()
+    try await database.write { db in
+      try Note.insert { Note.Draft(Note(title: "Account A's note")) }.execute(db)
+    }
+
+    var state = RootFeature.State()
+    state.auth = AuthFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = database
+      $0.notesClient.fetchAll = { [] }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionChanged(.valid(tokens(sub: "b"))))
+    await store.receive(\.userCacheWiped)
+    await store.receive(\.notesList.onAppear)
+    await store.receive(\.notesList.notesLoaded)
+
+    #expect(store.state.auth == nil)
+    let remaining = try await database.read { try Note.fetchAll($0) }
+    #expect(remaining.isEmpty)
   }
 }

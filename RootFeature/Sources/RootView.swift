@@ -1,3 +1,4 @@
+import AuthFeature
 import ComposableArchitecture
 import Core
 import JWTAuth
@@ -34,6 +35,22 @@ public struct RootFeature: Sendable {
     public var isSessionLoaded = false
     public var notesList = NotesListFeature.State()
 
+    /// The sign-in / sign-up sheet, presented by the account button while
+    /// signed out. Dismissed through the session observer below when a
+    /// sign-in publishes — the feature never dismisses itself.
+    @Presents public var auth: AuthFeature.State?
+
+    /// The sign-out confirmation, presented by the account button while a
+    /// session exists.
+    @Presents public var confirmationDialog:
+      ConfirmationDialogState<Action.ConfirmationDialog>?
+
+    /// Shown when `signOut` throws: destroying the local credentials is the
+    /// only step that can fail, and a silent failure would leave the user
+    /// believing they had signed out when their credentials are still on the
+    /// device.
+    @Presents public var alert: AlertState<Never>?
+
     public init() {}
 
     /// Whether a persisted session is present. `.expired` still carries a
@@ -59,6 +76,15 @@ public struct RootFeature: Sendable {
     case userCacheWiped(pendingUserId: String?)
     case userCacheWipeFailed
     case notesList(NotesListFeature.Action)
+    case auth(PresentationAction<AuthFeature.Action>)
+    case confirmationDialog(PresentationAction<ConfirmationDialog>)
+    case alert(PresentationAction<Never>)
+    case signOutResponse(Result<Void, any Error>)
+
+    @CasePathable
+    public enum ConfirmationDialog: Equatable, Sendable {
+      case confirmSignOutButtonTapped
+    }
   }
 
   @Dependency(\.jwtAuthClient) var authClient
@@ -126,6 +152,11 @@ public struct RootFeature: Sendable {
       case .sessionChanged(let session):
         switch session {
         case .valid(let tokens):
+          // A successful sign-in publishes here, whether it switched accounts
+          // or not: dismiss the auth sheet before the same-`sub` early return
+          // so an ordinary sign-in that keeps the same account is dismissed
+          // too.
+          state.auth = nil
           // Rotating an access token keeps the same identity — only a
           // different `sub` (or an unreadable token, whose `sub` reads back
           // `nil`) means the account actually changed.
@@ -162,9 +193,52 @@ public struct RootFeature: Sendable {
         state.notesList = NotesListFeature.State()
         return .none
 
+      case .notesList(.delegate(.accountButtonTapped)):
+        // Authentication is offered, not forced: the notes app must stay
+        // usable without a backend, so the button presents the sign-in sheet
+        // when signed out and the sign-out confirmation when signed in.
+        if state.isAuthenticated {
+          state.confirmationDialog = .signOut
+        } else {
+          state.auth = AuthFeature.State()
+        }
+        return .none
+
       case .notesList:
         return .none
+
+      case .confirmationDialog(.presented(.confirmSignOutButtonTapped)):
+        state.confirmationDialog = nil
+        return .run { send in
+          @Dependency(\.sessionClient) var sessionClient
+          do {
+            try await sessionClient.signOut()
+            await send(.signOutResponse(.success(())))
+          } catch {
+            await send(.signOutResponse(.failure(error)))
+          }
+        }
+
+      case .signOutResponse(.success):
+        // The credential destroy published the session change; the observer
+        // above performs the cache wipe with no extra wiring.
+        return .none
+
+      case .signOutResponse(.failure(let error)):
+        logger.error("Sign out failed: \(error, privacy: .public)")
+        state.alert = AlertState {
+          TextState("Couldn't sign out.")
+        } message: {
+          TextState("Please try again.")
+        }
+        return .none
+
+      case .auth, .alert, .confirmationDialog:
+        return .none
       }
+    }
+    .ifLet(\.$auth, action: \.auth) {
+      AuthFeature()
     }
   }
 
@@ -186,7 +260,7 @@ public struct RootFeature: Sendable {
 // MARK: - View
 
 public struct RootView: View {
-  let store: StoreOf<RootFeature>
+  @Bindable var store: StoreOf<RootFeature>
 
   public init(store: StoreOf<RootFeature>) {
     self.store = store
@@ -206,6 +280,48 @@ public struct RootView: View {
     // session is never loaded and the progress view never resolves.
     .task {
       await store.send(.task).finish()
+    }
+    // Account entry and exit are owned here, at the root, because the session
+    // observer lives in the same feature: a successful sign-in dismisses the
+    // sheet through `.sessionChanged`, and sign-out runs the revoking
+    // `sessionClient.signOut()`.
+    .sheet(item: $store.scope(state: \.auth, action: \.auth)) { authStore in
+      NavigationStack {
+        AuthView(store: authStore)
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Cancel") {
+                store.send(.auth(.dismiss))
+              }
+            }
+          }
+      }
+    }
+    .confirmationDialog(
+      $store.scope(state: \.confirmationDialog, action: \.confirmationDialog)
+    )
+    .alert($store.scope(state: \.alert, action: \.alert))
+  }
+}
+
+// MARK: - Sign-out dialog
+
+extension ConfirmationDialogState where Action == RootFeature.Action.ConfirmationDialog {
+  /// The sign-out confirmation the account button presents while signed in.
+  static var signOut: Self {
+    ConfirmationDialogState {
+      TextState("Sign Out?")
+    } actions: {
+      ButtonState(role: .destructive, action: .confirmSignOutButtonTapped) {
+        TextState("Sign Out")
+      }
+      ButtonState(role: .cancel) {
+        TextState("Cancel")
+      }
+    } message: {
+      TextState(
+        "Signing out (or switching accounts) wipes this account's cached notes from the device."
+      )
     }
   }
 }

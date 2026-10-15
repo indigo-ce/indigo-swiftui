@@ -27,6 +27,15 @@ public struct NotesListFeature: Sendable {
     case deleteCompleted(Result<Void, Error>)
     case dismissError
     case editor(PresentationAction<NoteEditorFeature.Action>)
+    case delegate(Delegate)
+
+    /// Out-of-feature events. The list stays unaware of auth; the root
+    /// feature owns the account presentations and decides what a tap means
+    /// based on the session it already observes.
+    @CasePathable
+    public enum Delegate: Sendable {
+      case accountButtonTapped
+    }
   }
 
   @Dependency(\.notesClient) var notesClient
@@ -96,6 +105,9 @@ public struct NotesListFeature: Sendable {
 
       case .editor:
         return .none
+
+      case .delegate:
+        return .none
       }
     }
     .ifLet(\.$editor, action: \.editor) {
@@ -147,6 +159,17 @@ public struct NotesListView: View {
           } label: {
             Image(systemName: "plus")
           }
+        }
+        // `.navigation` is the leading placement that is valid on both iOS
+        // and macOS. It only reports the tap; `RootFeature` presents the
+        // sign-in sheet or the sign-out confirmation.
+        ToolbarItem(placement: .navigation) {
+          Button {
+            store.send(.delegate(.accountButtonTapped))
+          } label: {
+            Image(systemName: "person.crop.circle")
+          }
+          .accessibilityLabel("Account")
         }
       }
       .sheet(item: $store.scope(state: \.editor, action: \.editor)) { editorStore in
