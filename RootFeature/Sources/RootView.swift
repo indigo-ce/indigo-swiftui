@@ -51,6 +51,12 @@ public struct RootFeature: Sendable {
     /// device.
     @Presents public var alert: AlertState<Never>?
 
+    /// A `signOut` attempt is in flight. While it runs, the account button
+    /// presents nothing: re-presenting the dialog would let a second confirm
+    /// start a second effect, whose stale failure response could raise the
+    /// alert after a concurrent attempt already ended the session.
+    public var isSigningOut = false
+
     public init() {}
 
     /// Whether a persisted session is present. `.expired` still carries a
@@ -197,6 +203,7 @@ public struct RootFeature: Sendable {
         // Authentication is offered, not forced: the notes app must stay
         // usable without a backend, so the button presents the sign-in sheet
         // when signed out and the sign-out confirmation when signed in.
+        guard !state.isSigningOut else { return .none }
         if state.isAuthenticated {
           state.confirmationDialog = .signOut
         } else {
@@ -209,6 +216,7 @@ public struct RootFeature: Sendable {
 
       case .confirmationDialog(.presented(.confirmSignOutButtonTapped)):
         state.confirmationDialog = nil
+        state.isSigningOut = true
         return .run { send in
           @Dependency(\.sessionClient) var sessionClient
           do {
@@ -222,10 +230,12 @@ public struct RootFeature: Sendable {
       case .signOutResponse(.success):
         // The credential destroy published the session change; the observer
         // above performs the cache wipe with no extra wiring.
+        state.isSigningOut = false
         return .none
 
       case .signOutResponse(.failure(let error)):
         logger.error("Sign out failed: \(error, privacy: .public)")
+        state.isSigningOut = false
         state.alert = AlertState {
           TextState("Couldn't sign out.")
         } message: {

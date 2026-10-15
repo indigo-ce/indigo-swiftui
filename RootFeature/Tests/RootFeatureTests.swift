@@ -460,6 +460,7 @@ extension RootFeatureTests {
 
     #expect(signOutCalls.withLock { $0 } == 1)
     #expect(store.state.alert == nil)
+    #expect(!store.state.isSigningOut)
   }
 
   @Test func failedSignOutPresentsTheAlert() async {
@@ -472,6 +473,41 @@ extension RootFeatureTests {
     await store.receive(\.signOutResponse)
 
     #expect(store.state.alert != nil)
+    #expect(!store.state.isSigningOut)
+  }
+
+  /// While a sign-out attempt is in flight, the account button presents
+  /// nothing: re-presenting the dialog would let a second confirm start a
+  /// second effect, whose stale failure response could raise the alert after
+  /// a concurrent attempt already ended the session.
+  @Test func accountButtonWhileSigningOutPresentsNothing() async {
+    let (signOutStarted, signOutStartedContinuation) =
+      AsyncStream<CheckedContinuation<Void, Never>>.makeStream()
+    let store = makeSignedInStore {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        signOutStartedContinuation.yield(continuation)
+      }
+    }
+
+    await store.send(.notesList(.delegate(.accountButtonTapped)))
+    await store.send(.confirmationDialog(.presented(.confirmSignOutButtonTapped)))
+
+    var pendingContinuation: CheckedContinuation<Void, Never>?
+    for await continuation in signOutStarted {
+      pendingContinuation = continuation
+      break
+    }
+    #expect(store.state.isSigningOut)
+
+    await store.send(.notesList(.delegate(.accountButtonTapped)))
+    #expect(store.state.confirmationDialog == nil)
+    #expect(store.state.auth == nil)
+    #expect(store.state.isSigningOut)
+
+    pendingContinuation?.resume()
+    await store.receive(\.signOutResponse)
+
+    #expect(!store.state.isSigningOut)
   }
 
   /// A sign-in that keeps the same account still publishes `.valid` — the
