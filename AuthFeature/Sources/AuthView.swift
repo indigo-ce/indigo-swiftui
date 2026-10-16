@@ -31,6 +31,9 @@ public struct AuthFeature: Sendable {
     // Set when a sign-up succeeded. Signing up does not sign in — see
     // `SessionClient`.
     public var signUpSuccess = false
+    // The forgot-password sheet, offered in sign-in mode and seeded with the
+    // email already typed.
+    @Presents public var forgotPassword: ForgotPasswordFeature.State?
 
     public enum Mode: Hashable, Sendable {
       case signIn
@@ -41,12 +44,14 @@ public struct AuthFeature: Sendable {
       mode: Mode = .signIn,
       name: String = "",
       email: String = "",
-      password: String = ""
+      password: String = "",
+      forgotPassword: ForgotPasswordFeature.State? = nil
     ) {
       self.mode = mode
       self.name = name
       self.email = email
       self.password = password
+      self.forgotPassword = forgotPassword
     }
   }
 
@@ -56,6 +61,8 @@ public struct AuthFeature: Sendable {
     case signInResponse
     case signUpResponse
     case failed(String)
+    case forgotPasswordButtonTapped
+    case forgotPassword(PresentationAction<ForgotPasswordFeature.Action>)
   }
 
   public init() {}
@@ -134,7 +141,20 @@ public struct AuthFeature: Sendable {
         state.isLoading = false
         state.errorMessage = message
         return .none
+
+      case .forgotPasswordButtonTapped:
+        // Sign-in mode only, and never mid-request: a half-typed sign-up or an
+        // in-flight attempt is not a reset request for the typed email.
+        guard state.mode == .signIn, !state.isLoading else { return .none }
+        state.forgotPassword = ForgotPasswordFeature.State(email: state.email)
+        return .none
+
+      case .forgotPassword:
+        return .none
       }
+    }
+    .ifLet(\.$forgotPassword, action: \.forgotPassword) {
+      ForgotPasswordFeature()
     }
   }
 
@@ -194,6 +214,14 @@ public struct AuthView: View {
         .disabled(store.isLoading)
         .textContentType(store.mode == .signUp ? .newPassword : .password)
 
+      if store.mode == .signIn {
+        Button("Forgot password?") {
+          store.send(.forgotPasswordButtonTapped)
+        }
+        .font(.footnote)
+        .disabled(store.isLoading)
+      }
+
       Button {
         store.send(.submitButtonTapped)
       } label: {
@@ -212,6 +240,10 @@ public struct AuthView: View {
       if let errorMessage = store.errorMessage {
         InlineNotice.error(verbatim: errorMessage)
       }
+    }
+    .sheet(item: $store.scope(state: \.forgotPassword, action: \.forgotPassword)) {
+      forgotPasswordStore in
+      ForgotPasswordView(store: forgotPasswordStore)
     }
   }
 }
