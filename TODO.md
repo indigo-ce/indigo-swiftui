@@ -9,75 +9,12 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
-### 1. Present `AuthFeature` from `RootFeature` and ship a sign-out control
-
-- [x] **Gap.** The `AuthFeature` module (`AuthFeature/Sources/AuthView.swift`)
-      ships the sign-in / sign-up form, but nothing links or presents it, so
-      it has no entry point in the running app. `SessionClient.signOut()` —
-      which the docs insist must replace a bare `authTokensClient.destroy()`
-      — has no shipped call site either. A cloner gets the full session
-      lifecycle in `Core` with nothing in the app that starts or ends a
-      session.
-- **Desired behavior.** The notes app stays usable without a backend (DEBUG
-  builds point at a local dev server a cloner may not be running), so
-  authentication is offered, not forced: an account button in the notes
-  list opens the sign-in sheet when signed out and a sign-out confirmation
-  when signed in. `RootFeature` owns both presentations, because it already
-  observes `@Shared(.authSession)`; `NotesListFeature` stays unaware of
-  auth and only reports the tap. A successful sign-in dismisses the sheet
-  through the existing session observer — `AuthFeature` never dismisses
-  itself on success. Sign-out goes through `sessionClient.signOut()`, and
-  the existing observer performs the cache wipe with no extra wiring.
-- **Scope.**
-  - `NotesListFeature/Sources/NotesListView.swift`: add
-    `case delegate(Delegate)` with `Delegate.accountButtonTapped`, and a
-    toolbar button (`person.crop.circle`, a placement valid on iOS and
-    macOS such as `.navigation`) that sends it. The reducer returns
-    `.none` for it.
-  - `RootFeature/Sources/RootView.swift`: `@Presents var auth:
-    AuthFeature.State?` and `@Presents var confirmationDialog:
-    ConfirmationDialogState<Action.ConfirmationDialog>?`; on
-    `.notesList(.delegate(.accountButtonTapped))` present the dialog when
-    `isAuthenticated`, otherwise the auth sheet. Confirming sign-out runs
-    `@Dependency(\.sessionClient).signOut()`. `signOut` only throws when
-    the local credential destroy fails — the user is then still signed in
-    on this device — so a thrown error is logged with the existing
-    `logger` **and** surfaced through a `@Presents var alert:
-    AlertState<Never>?` ("Couldn't sign out. Please try again."); a
-    silently swallowed failure would leave the user believing they had
-    signed out. The revoke step's own failures are already swallowed
-    inside `signOut` and need no handling here.
-    In `.sessionChanged(.valid)`, set `auth = nil` **before** the
-    same-`sub` early return, so a sign-in is dismissed even when it does
-    not switch accounts. `RootView` attaches `.sheet(item:)` (wrapping
-    `AuthView` in a `NavigationStack` with a Cancel button that dismisses),
-    `.confirmationDialog`, and `.alert` to the content it already renders.
-  - `RootFeature/Project.swift`: depend on `AuthFeature`.
-  - `docs/api-clients.md` Session Lifecycle: name `AuthFeature` and the
-    `RootFeature` account flow as the shipped `signIn` / `signOut` call
-    sites.
-- **Dependencies.** None (`AuthFeature` has shipped).
-- **Acceptance.** New `RootFeatureTests` cases (reusing `makeStore` and
-  `tokens(sub:)`; override `store.dependencies.sessionClient` per test, since
-  `makeStore` does not set it) prove: the account button with no session
-  presents `auth`; with a `.valid` session it presents the confirmation
-  dialog and not `auth`; confirming calls `sessionClient.signOut` exactly
-  once and presents no alert on success; a throwing `signOut` presents the
-  alert; `.sessionChanged(.valid(tokens(sub:)))` clears a presented `auth`
-  both for a new account and for the same `sub`. The existing cache-wipe
-  tests still pass unchanged.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build --platform ios` and
-  `mise exec -- tuist build --platform macos`. Tests run headlessly with
-  `mise exec -- tuist test --platform macos`; otherwise state in the PR
-  that CI's iOS test job is the proof.
-
-### 2. Add a forgot-password sheet to `AuthFeature`
+### 1. Add a forgot-password sheet to `AuthFeature`
 
 - [ ] **Gap.** `SessionClient.requestPasswordReset(email)` ships, but the
-      shipped sign-in form (`AuthView`) offers no way to reach it, so a user who
-      forgot their password is stuck and a cloner builds the flow from
-      scratch.
+      sign-in form (`AuthView`, presented from the notes list's account
+      button) offers no way to reach it, so a user who forgot their password
+      is stuck and a cloner builds the flow from scratch.
 - **Desired behavior.** The sign-in mode offers "Forgot password?", which
   presents a small child feature prefilled with the email already typed.
   Submitting calls `requestPasswordReset`; success replaces the form with a
@@ -98,7 +35,7 @@ do not rely on a simulator run.
   `AuthFeature.errorMessage(from:)` and log them with the file's
   `Logger(subsystem: "Indigo", category: "AuthFeature")`. Same
   `#if os(iOS)` rule for iOS-only modifiers as `AuthView.swift`.
-- **Dependencies.** None. Independent of item 1.
+- **Dependencies.** None.
 - **Acceptance.** New cases in `AuthFeature/Tests/AuthFeatureTests.swift`
   prove: tapping "Forgot password?" presents the child with the sign-in
   email; submit calls `requestPasswordReset` with that email and sets
@@ -106,6 +43,45 @@ do not rely on a simulator run.
   to the server text; submit with an empty email or while loading sends
   nothing; Done/Cancel invoke `dismiss`. The existing `AuthFeatureTests`
   still pass.
+- **Validation.** `mise exec -- tuist generate --no-open`, then
+  `mise exec -- tuist build --platform ios` and
+  `mise exec -- tuist build --platform macos`; tests via
+  `mise exec -- tuist test --platform macos` where possible, otherwise CI.
+
+### 2. Cancel the in-flight notes fetch when the user cache is wiped
+
+- [ ] **Gap.** `NotesListFeature`'s `.onAppear` fetch is not cancellable.
+      When a session change starts `RootFeature.wipeUserCache`, a fetch
+      that began earlier (the list's first `.task`, or the refetch after a
+      save or delete) can still deliver `.notesLoaded` with the previous
+      account's rows after `.userCacheWiped` or `.userCacheWipeFailed` has
+      reset `notesList`. On success the stale rows show until the next
+      fetch; on failure they come back even though `.userCacheWipeFailed`
+      exists to hide them.
+- **Desired behavior.** A wipe supersedes any notes fetch issued before
+  it. Only a fetch started after the reset can populate the list.
+- **Scope.**
+  - `NotesListFeature/Sources/NotesListView.swift`: add a public
+    `enum CancelID: Hashable, Sendable { case fetch }` and mark the
+    `.onAppear` effect `.cancellable(id: CancelID.fetch, cancelInFlight:
+    true)`, so overlapping refetches also collapse to the latest one.
+  - `RootFeature/Sources/RootView.swift`: `wipeUserCache` cancels
+    `NotesListFeature.CancelID.fetch` before it starts the delete (for
+    example `.merge(.cancel(id:), .run { … })`). `.userCacheWipeFailed`
+    also returns `.cancel(id: NotesListFeature.CancelID.fetch)` in place
+    of `.none`. Add a short comment on why: a pre-wipe read must not
+    repopulate the reset list.
+- **Dependencies.** None.
+- **Acceptance.** A new `RootFeatureTests` case sets a `notesClient.fetchAll`
+  that suspends until the test releases it (for example on an
+  `AsyncStream` or a checked continuation the test holds) and then returns
+  a previous-account note. Start that fetch with `.notesList(.onAppear)`,
+  send `.sessionChanged(nil)`, let the wipe finish, then release the fetch.
+  `store.state.notesList.notes` never contains the stale note, and the
+  test finishes with no unexpected `.notesLoaded` carrying it. A second
+  case covers the same ordering through `.userCacheWipeFailed` (closed
+  database, as in `wipeFailureKeepsTheMarkerAndHidesTheRows`). The
+  existing `RootFeatureTests` and `NotesListFeatureTests` pass unchanged.
 - **Validation.** `mise exec -- tuist generate --no-open`, then
   `mise exec -- tuist build --platform ios` and
   `mise exec -- tuist build --platform macos`; tests via
@@ -148,3 +124,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Drop the `xctest-dynamic-overlay` pin from `Package.swift`
 - [x] Give `SessionClient` verification-email and password-reset operations
 - [x] Add an `AuthFeature` module with sign-in and sign-up forms
+- [x] Present `AuthFeature` from `RootFeature` and ship a sign-out control
