@@ -11,7 +11,7 @@ do not rely on a simulator run.
 
 ### 1. Present `AuthFeature` from `RootFeature` and ship a sign-out control
 
-- [ ] **Gap.** The `AuthFeature` module (`AuthFeature/Sources/AuthView.swift`)
+- [x] **Gap.** The `AuthFeature` module (`AuthFeature/Sources/AuthView.swift`)
       ships the sign-in / sign-up form, but nothing links or presents it, so
       it has no entry point in the running app. `SessionClient.signOut()` —
       which the docs insist must replace a bare `authTokensClient.destroy()`

@@ -351,6 +351,11 @@ Tokens live in two layers, and the library keeps them in lockstep:
   through the gated `authTokensClient.save` — that save is what publishes the
   session on `@Shared(.authSession)`. A failed exchange stores nothing and
   rethrows; read the server's message with `APIErrorBody.from(error)`.
+  The shipped `signIn` call site is `AuthFeature`
+  (`AuthFeature/Sources/AuthView.swift`): the account button in the notes
+  list presents its form from `RootFeature`, and the same feature's session
+  observer dismisses the sheet when a sign-in publishes — the form never
+  decides what happens after a successful exchange.
 - Sign-up and password-reset requests go through
   `@Dependency(\.sessionClient).signUp(name, email, password)` and
   `.requestPasswordReset(email)`. Both are plain unauthenticated requests
@@ -380,7 +385,11 @@ Tokens live in two layers, and the library keeps them in lockstep:
   the local credentials. A revoke failure (offline, 5xx, timeout) is logged
   and never keeps the user signed in; only a local `destroy()` failure
   throws, because destroying the stored credentials is what actually ends the
-  session on this device. The revoke call uses `send`, not
+  session on this device. The shipped `signOut` call site is `RootFeature`'s
+  account flow: a signed-in user confirms the sign-out dialog, and a thrown
+  error is logged and surfaced in an alert instead of being swallowed — the
+  user must not be left believing they signed out when the credentials are
+  still on the device. The revoke call uses `send`, not
   `sendAuthenticated`: the route authenticates with the refresh token in the
   body, and refreshing an expired access token first would rotate the very
   token about to be revoked. See
