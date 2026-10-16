@@ -1,5 +1,5 @@
 {
-  "originHash" : "c6b7df755ebcdb1a334fefe8891a74f572139de3316e1d55fb7d6efa7ccb9458",
+  "originHash" : "5c5f80733d1345b0d135cf16e980fd831a67d5601d886c6782ea4604da16fd4c",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -51,8 +51,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/indigo-ce/jwt-auth-client",
       "state" : {
-        "revision" : "c6176799fe2fbf94b70a5aa79c1f2e62c000a4fb",
-        "version" : "2.0.0"
+        "revision" : "d2405c54d7f219d58b89e5bd9a9bb636f94157e0",
+        "version" : "2.1.0"
       }
     },
     {
@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/swift-concurrency-extras",
       "state" : {
-        "revision" : "5fa253428866f2360c3754e88537f700ed2656b5",
-        "version" : "1.4.1"
+        "revision" : "8a4260f7373493435bd21194585c95b72bfdd401",
+        "version" : "1.4.3"
       }
     },
     {
@@ -204,8 +204,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/swift-issue-reporting",
       "state" : {
-        "revision" : "75b000cea2ca6d7527a57e1b9cc0bdf21a9abe9f",
-        "version" : "2.1.1"
+        "revision" : "b23bb4493c439d3e05152bc167014235ba3d47fc",
+        "version" : "2.1.2"
       }
     },
     {
