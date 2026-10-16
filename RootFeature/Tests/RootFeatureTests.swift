@@ -130,7 +130,7 @@ extension RootFeatureTests {
   /// makes the same-identity guard swallow every transition and the tests
   /// pass for the wrong reason. Built directly rather than via `toSession()`,
   /// which inspects `exp`.
-  private func tokens(sub: String) -> AuthTokens {
+  private func tokens(sub: String?) -> AuthTokens {
     func base64url(_ string: String) -> String {
       Data(string.utf8).base64EncodedString()
         .replacingOccurrences(of: "+", with: "-")
@@ -138,7 +138,7 @@ extension RootFeatureTests {
         .replacingOccurrences(of: "=", with: "")
     }
     let header = base64url(#"{"alg":"HS256"}"#)
-    let payload = base64url(#"{"sub":"\#(sub)"}"#)
+    let payload = base64url(sub.map { #"{"sub":"\#($0)"}"# } ?? "{}")
     return AuthTokens(access: "\(header).\(payload).signature", refresh: "refresh")
   }
 
@@ -385,10 +385,12 @@ extension RootFeatureTests {
     }
 
     // Same database as the feature sees, so a wrongly-issued wipe would
-    // delete the seeded row and fail the assertion below.
-    let store = makeStore(database: database) { _ in
-      AuthTokens(access: "fresh", refresh: "fresh")
-    }
+    // delete the seeded row and fail the assertion below. The refresh must
+    // return a decodable, unexpired token: an unreadable one publishes as
+    // `.expired`, which legitimately wipes. No `sub`, matching the restored
+    // tokens, so the refresh is not an account switch either.
+    let freshTokens = tokens(sub: nil)
+    let store = makeStore(database: database) { _ in freshTokens }
 
     await store.send(.task)
     await store.receive(\.sessionLoaded)
