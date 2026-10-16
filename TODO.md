@@ -9,46 +9,7 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
-### 1. Add a forgot-password sheet to `AuthFeature`
-
-- [ ] **Gap.** `SessionClient.requestPasswordReset(email)` ships, but the
-      sign-in form (`AuthView`, presented from the notes list's account
-      button) offers no way to reach it, so a user who forgot their password
-      is stuck and a cloner builds the flow from scratch.
-- **Desired behavior.** The sign-in mode offers "Forgot password?", which
-  presents a small child feature prefilled with the email already typed.
-  Submitting calls `requestPasswordReset`; success replaces the form with a
-  "Check your email for a reset link." notice and a Done button; failure
-  shows the server's message through the same mapping `AuthFeature` uses.
-  The child never touches the session. Redeeming the reset token stays out
-  of scope: the emailed link opens the backend's web page, and there is no
-  in-app deep-link destination.
-- **Scope.** In the `AuthFeature` module only: a
-  `ForgotPasswordFeature` reducer + `ForgotPasswordView` in
-  `AuthFeature/Sources/ForgotPasswordView.swift` (state: `email`,
-  `isLoading`, `errorMessage`, `emailSent`; Cancel/Done dismiss via
-  `@Dependency(\.dismiss)`); in `AuthFeature`, `@Presents var
-  forgotPassword`, a `forgotPasswordButtonTapped` action (sign-in mode
-  only, a no-op while `isLoading`) that seeds the email, `.ifLet`, and the
-  `.sheet(item:)` in `AuthView` (the button is disabled while loading,
-  like the other controls there). Map failures with the existing
-  `AuthFeature.errorMessage(from:)` and log them with the file's
-  `Logger(subsystem: "Indigo", category: "AuthFeature")`. Same
-  `#if os(iOS)` rule for iOS-only modifiers as `AuthView.swift`.
-- **Dependencies.** None.
-- **Acceptance.** New cases in `AuthFeature/Tests/AuthFeatureTests.swift`
-  prove: tapping "Forgot password?" presents the child with the sign-in
-  email; submit calls `requestPasswordReset` with that email and sets
-  `emailSent`; a `badResponse` `{"error": …}` failure sets `errorMessage`
-  to the server text; submit with an empty email or while loading sends
-  nothing; Done/Cancel invoke `dismiss`. The existing `AuthFeatureTests`
-  still pass.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build --platform ios` and
-  `mise exec -- tuist build --platform macos`; tests via
-  `mise exec -- tuist test --platform macos` where possible, otherwise CI.
-
-### 2. Cancel the in-flight notes fetch when the user cache is wiped
+### 1. Cancel the in-flight notes fetch when the user cache is wiped
 
 - [ ] **Gap.** `NotesListFeature`'s `.onAppear` fetch is not cancellable.
       When a session change starts `RootFeature.wipeUserCache`, a fetch
@@ -125,3 +86,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Give `SessionClient` verification-email and password-reset operations
 - [x] Add an `AuthFeature` module with sign-in and sign-up forms
 - [x] Present `AuthFeature` from `RootFeature` and ship a sign-out control
+- [x] Add a forgot-password sheet to `AuthFeature`
