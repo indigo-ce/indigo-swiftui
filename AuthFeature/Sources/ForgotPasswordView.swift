@@ -72,6 +72,10 @@ public struct ForgotPasswordFeature: Sendable {
             try await sessionClient.requestPasswordReset(email)
             await send(.sendResponse)
           } catch {
+            // Dismissing the sheet mid-request cancels this effect; a
+            // cancellation is not a request failure, so never log it as one or
+            // report it to the sheet that is already gone.
+            guard !Task.isCancelled else { return }
             logger.error("Password-reset request failed: \(error, privacy: .public)")
             await send(.failed(AuthFeature.errorMessage(from: error)))
           }

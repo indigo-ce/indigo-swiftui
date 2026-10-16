@@ -387,6 +387,32 @@ struct AuthFeatureTests {
   }
 
   @Test
+  func forgotPasswordCancelWhileLoadingEndsTheRequestWithoutAFailure() async {
+    // The gate is never released: the request stays suspended until the
+    // dismissal cancels it, then throws the way URLSession reports one.
+    let (gate, _) = AsyncStream<Void>.makeStream()
+    let store = makeStore(
+      initialState: AuthFeature.State(email: "user@example.com"),
+      requestPasswordReset: { _ in
+        for await _ in gate {}
+        throw URLError(.cancelled)
+      }
+    )
+
+    await store.send(.forgotPasswordButtonTapped) {
+      $0.forgotPassword = ForgotPasswordFeature.State(email: "user@example.com")
+    }
+    await store.send(.forgotPassword(.presented(.submitButtonTapped))) {
+      $0.forgotPassword?.isLoading = true
+    }
+    // Dismissing cancels the in-flight request; no `.failed` follows.
+    await store.send(.forgotPassword(.presented(.cancelButtonTapped)))
+    await store.receive(.forgotPassword(.dismiss)) {
+      $0.forgotPassword = nil
+    }
+  }
+
+  @Test
   func forgotPasswordDoneDismissesTheSheet() async {
     let store = makeStore(initialState: AuthFeature.State(email: "user@example.com"))
 
