@@ -17,6 +17,28 @@ public struct AccountProfile: Decodable, Equatable, Sendable {
   public let emailVerified: Bool
   public let createdAt: Date
   public let updatedAt: Date
+
+  /// Memberwise on purpose: the synthesized initializer is internal, and
+  /// feature targets (separate frameworks) constructing fixtures for previews
+  /// or tests could not build a profile otherwise. See `Note` for the same
+  /// convention.
+  public init(
+    id: String,
+    email: String,
+    name: String,
+    image: String? = nil,
+    emailVerified: Bool,
+    createdAt: Date,
+    updatedAt: Date
+  ) {
+    self.id = id
+    self.email = email
+    self.name = name
+    self.image = image
+    self.emailVerified = emailVerified
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+  }
 }
 
 // MARK: - Client
