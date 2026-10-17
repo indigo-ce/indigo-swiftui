@@ -387,6 +387,25 @@ private final class AuthStubProtocol: URLProtocol {
     #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
   }
 
+  /// The save publishes `.valid`, which dismisses the sign-in sheet and
+  /// cancels the effect running `signIn`. The revoke that follows must
+  /// survive that cancellation, or the displaced refresh token stays live.
+  @Test func signInRevokesTheDisplacedTokenEvenWhenCancelledAfterSave() async throws {
+    // Cancel a child task, not the test's own: Swift Testing reports a test
+    // whose task is cancelled as skipped.
+    let signingIn = Task {
+      try await signIn(
+        seedTokens: true,
+        keychainSave: { _, _ in withUnsafeCurrentTask { $0?.cancel() } }
+      )
+    }
+    _ = try await signingIn.value
+    #expect(
+      AuthStubProtocol.requests.map(\.path)
+        == ["/api/v1/auth/sign-in", "/api/v1/auth/revoke-access"]
+    )
+  }
+
   // MARK: Sign-up and password-reset request
 
   @Test func signUpSendsTheExpectedRequestAndLeavesTheSessionAlone() async throws {

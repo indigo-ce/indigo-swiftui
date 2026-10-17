@@ -102,8 +102,12 @@ extension SessionClient: DependencyKey {
         AuthTokens(access: response.accessToken, refresh: response.refreshToken)
       )
 
+      // The save just published `.valid`, which dismisses the sign-in sheet
+      // and cancels the effect running this closure. Revoke from an
+      // unstructured task: it keeps the current dependencies but not the
+      // cancellation, so the request still reaches the server.
       if let displacedRefresh {
-        await revokeRefreshToken(displacedRefresh)
+        await Task { await revokeRefreshToken(displacedRefresh) }.value
       }
     },
     signOut: {
