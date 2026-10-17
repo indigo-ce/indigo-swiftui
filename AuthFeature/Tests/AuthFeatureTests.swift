@@ -324,7 +324,7 @@ struct AuthFeatureTests {
       $0.isLoading = true
       $0.errorMessage = nil
     }
-    await store.receive(\.verificationEmailSent) {
+    await store.receive(.verificationEmailSent(email: refusedEmail)) {
       $0.isLoading = false
       $0.verificationEmailSent = true
     }
@@ -429,6 +429,110 @@ struct AuthFeatureTests {
     await store.receive(\.signInResponse) {
       $0.isLoading = false
     }
+  }
+
+  @Test
+  func signInRefusalArrivingAfterAnEmailEditRecordsNoResendTarget() async {
+    // The form disables its fields mid-request, but the reducer must not
+    // depend on that: a refusal that races an edit must not point the resend
+    // button at the address the form no longer shows.
+    let refusedEmail = "unverified@example.com"
+    let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+    let store = makeStore(
+      initialState: AuthFeature.State(email: refusedEmail, password: "secret"),
+      signIn: { _, _ in
+        for await _ in gate { break }
+        throw HTTPRequestClient.Error.badResponse(
+          UUID(), 401, #"{"error":"Email not verified"}"#
+        )
+      }
+    )
+
+    await store.send(.submitButtonTapped) {
+      $0.isLoading = true
+      $0.errorMessage = nil
+      $0.unverifiedEmail = nil
+      $0.verificationEmailSent = false
+    }
+    await store.send(.binding(.set(\.email, "other@example.com"))) {
+      $0.email = "other@example.com"
+      $0.unverifiedEmail = nil
+      $0.verificationEmailSent = false
+    }
+
+    gateContinuation.yield()
+    await store.receive(.emailNotVerified(email: refusedEmail, message: "Email not verified")) {
+      $0.isLoading = false
+      $0.errorMessage = "Email not verified"
+    }
+    // The stale refusal records no address, so no resend button appears.
+    #expect(store.state.unverifiedEmail == nil)
+  }
+
+  @Test
+  func resendCompletionAfterAnEmailEditIsIgnored() async {
+    // A completion for the old address must not show the check-your-inbox
+    // notice beside a different one.
+    let refusedEmail = "unverified@example.com"
+    let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+    var initialState = AuthFeature.State(email: refusedEmail)
+    initialState.unverifiedEmail = refusedEmail
+    let store = makeStore(
+      initialState: initialState,
+      sendVerificationEmail: { _ in
+        for await _ in gate { break }
+      }
+    )
+
+    await store.send(.resendVerificationEmailButtonTapped) {
+      $0.isLoading = true
+      $0.errorMessage = nil
+    }
+    await store.send(.binding(.set(\.email, "other@example.com"))) {
+      $0.email = "other@example.com"
+      $0.unverifiedEmail = nil
+      $0.verificationEmailSent = false
+    }
+
+    gateContinuation.yield()
+    await store.receive(.verificationEmailSent(email: refusedEmail)) {
+      $0.isLoading = false
+    }
+    #expect(!store.state.verificationEmailSent)
+  }
+
+  @Test
+  func resendCompletionAfterAModeSwitchIsIgnored() async {
+    // A completion that arrives after the user left sign-in must not light up
+    // the notice when they switch back.
+    let refusedEmail = "unverified@example.com"
+    let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+    var initialState = AuthFeature.State(email: refusedEmail)
+    initialState.unverifiedEmail = refusedEmail
+    let store = makeStore(
+      initialState: initialState,
+      sendVerificationEmail: { _ in
+        for await _ in gate { break }
+      }
+    )
+
+    await store.send(.resendVerificationEmailButtonTapped) {
+      $0.isLoading = true
+      $0.errorMessage = nil
+    }
+    await store.send(.binding(.set(\.mode, .signUp))) {
+      $0.mode = .signUp
+      $0.errorMessage = nil
+      $0.signUpSuccess = false
+      $0.unverifiedEmail = nil
+      $0.verificationEmailSent = false
+    }
+
+    gateContinuation.yield()
+    await store.receive(.verificationEmailSent(email: refusedEmail)) {
+      $0.isLoading = false
+    }
+    #expect(!store.state.verificationEmailSent)
   }
 
   // MARK: Forgot password

@@ -71,7 +71,7 @@ public struct AuthFeature: Sendable {
     case failed(String)
     case emailNotVerified(email: String, message: String)
     case resendVerificationEmailButtonTapped
-    case verificationEmailSent
+    case verificationEmailSent(email: String)
     case forgotPasswordButtonTapped
     case forgotPassword(PresentationAction<ForgotPasswordFeature.Action>)
   }
@@ -173,7 +173,12 @@ public struct AuthFeature: Sendable {
       case .emailNotVerified(let email, let message):
         state.isLoading = false
         state.errorMessage = message
-        state.unverifiedEmail = email
+        // Only record the refusal's address while the form still shows it: a
+        // response that races an edit must not point the resend button at an
+        // address the user no longer sees.
+        if email == state.email {
+          state.unverifiedEmail = email
+        }
         return .none
 
       case .resendVerificationEmailButtonTapped:
@@ -183,16 +188,22 @@ public struct AuthFeature: Sendable {
         return .run { send in
           do {
             try await sessionClient.sendVerificationEmail(email)
-            await send(.verificationEmailSent)
+            await send(.verificationEmailSent(email: email))
           } catch {
             logger.error("Verification-email resend failed: \(error, privacy: .public)")
             await send(.failed(AuthFeature.errorMessage(from: error)))
           }
         }
 
-      case .verificationEmailSent:
+      case .verificationEmailSent(let email):
         state.isLoading = false
-        state.verificationEmailSent = true
+        // Same rule as `.emailNotVerified`: apply the confirmation only while
+        // the resend still belongs to what the form shows. An email edit or a
+        // mode switch clears `unverifiedEmail`, so a completion for the old
+        // address no longer matches and is dropped.
+        if email == state.unverifiedEmail {
+          state.verificationEmailSent = true
+        }
         return .none
 
       case .forgotPasswordButtonTapped:
