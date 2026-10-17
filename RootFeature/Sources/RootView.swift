@@ -194,10 +194,12 @@ public struct RootFeature: Sendable {
 
       case .userCacheWipeFailed:
         // Hide the previous account's rows without refetching — the table
-        // may still hold them. The marker keeps naming the old account, so
-        // the next launch (or session change) retries the wipe.
+        // may still hold them. Cancel any in-flight notes fetch too: a
+        // pre-wipe read must not repopulate the list the failed wipe just
+        // hid. The marker keeps naming the old account, so the next launch
+        // (or session change) retries the wipe.
         state.notesList = NotesListFeature.State()
-        return .none
+        return .cancel(id: NotesListFeature.CancelID.fetch)
 
       case .notesList(.delegate(.accountButtonTapped)):
         // Authentication is offered, not forced: the notes app must stay
@@ -253,17 +255,23 @@ public struct RootFeature: Sendable {
   }
 
   private func wipeUserCache(pendingUserId: String?) -> Effect<Action> {
-    .run { [database] send in
-      do {
-        try await clearUserCache(database)
-        await send(.userCacheWiped(pendingUserId: pendingUserId))
-      } catch {
-        // A failed wipe must not crash the app; the stale rows are wiped on
-        // the next session change or launch.
-        logger.error("Wipe user cache failed: \(error, privacy: .public)")
-        await send(.userCacheWipeFailed)
+    // A pre-wipe read must not repopulate the reset list: cancel any notes
+    // fetch issued before the wipe, so only a fetch started after
+    // `.userCacheWiped` (or `.userCacheWipeFailed`) can deliver rows.
+    .merge(
+      .cancel(id: NotesListFeature.CancelID.fetch),
+      .run { [database] send in
+        do {
+          try await clearUserCache(database)
+          await send(.userCacheWiped(pendingUserId: pendingUserId))
+        } catch {
+          // A failed wipe must not crash the app; the stale rows are wiped on
+          // the next session change or launch.
+          logger.error("Wipe user cache failed: \(error, privacy: .public)")
+          await send(.userCacheWipeFailed)
+        }
       }
-    }
+    )
   }
 }
 

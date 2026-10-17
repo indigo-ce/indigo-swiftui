@@ -38,6 +38,13 @@ public struct NotesListFeature: Sendable {
     }
   }
 
+  /// Identifies the in-flight notes fetch so the root feature can cancel it
+  /// when it wipes the user cache (and so overlapping refetches collapse to
+  /// the latest one via `cancelInFlight`).
+  public enum CancelID: Hashable, Sendable {
+    case fetch
+  }
+
   @Dependency(\.notesClient) var notesClient
 
   public init() {}
@@ -50,6 +57,7 @@ public struct NotesListFeature: Sendable {
         return .run { send in
           await send(.notesLoaded(Result { try await notesClient.fetchAll() }))
         }
+        .cancellable(id: CancelID.fetch, cancelInFlight: true)
 
       case .notesLoaded(.success(let notes)):
         state.isLoading = false
