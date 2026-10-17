@@ -9,6 +9,59 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
+- [ ] Ship an `AccountClient` that fetches the signed-in profile
+
+  **Gap.** The template advertises JWT auth with automatic token refresh, but
+  no shipped code calls `sendAuthenticated`. Every request in
+  `Core/Sources/Clients/SessionClient.swift` deliberately uses `send`, and
+  `NotesClient` is local-only. So the authenticated path (refresh when
+  expired, attach the bearer, send once) is never exercised or tested. The
+  only examples live in `docs/api-clients.md`, and one of them already points
+  at `GET /api/v1/account/profile`. The backend serves that route behind its
+  JWT middleware. It answers 200 with
+  `{id, email, name, image, emailVerified, createdAt, updatedAt}`, where
+  `image` is nullable and both dates are ISO-8601 with fractional seconds. It
+  answers 401 `{error, code: "UNAUTHORIZED"}` for a bad token or a deleted
+  user.
+
+  **Scope.** Add `Core/Sources/Clients/AccountClient.swift` with a
+  `@DependencyClient` `AccountClient` exposing
+  `fetchProfile: () async throws -> AccountProfile`. Register it as
+  `DependencyValues.accountClient` with `liveValue`, `previewValue` (a fixed
+  sample profile), and `testValue` (unimplemented), following
+  `SessionClient`'s shape. `AccountProfile` is a public
+  `Decodable, Equatable, Sendable` struct in the same file that mirrors the
+  seven response fields (`image: String?`, dates as `Date`). The live closure
+  resolves `apiClient` and `networkSession` inside the closure and calls
+  `apiClient.sendAuthenticated(decoder: .api, urlSession: networkSession)`
+  with `Path("api", "v1", "account", "profile")`. Errors propagate untouched,
+  with no retry and no session mutation on 401, matching the documented
+  `sendAuthenticated` contract. No UI or feature wiring and no cache table.
+
+  **Acceptance.**
+  - The live closure is the first shipped `sendAuthenticated` call site.
+  - A doc comment explains why it uses `sendAuthenticated` where every
+    `SessionClient` route uses `send`.
+  - `docs/api-clients.md` "Making Authenticated Requests" points at
+    `AccountClient.swift` as the shipped example.
+  - The README's file or feature list mentions it if it enumerates clients.
+
+  **Validation.**
+  - Add `Core/Tests/AccountClientTests.swift`, driving
+    `AccountClient.liveValue` through a host-scoped `URLProtocol` stub in the
+    style of `SessionClientTests`, under `@Suite(.serialized)`.
+  - Seed a session the library treats as unexpired so no refresh fires. One
+    way is an access token that is a JWT with a future `exp`; another is
+    overriding `$0.apiClient.refresh` to fail the test if called.
+  - Assert the request is `GET /api/v1/account/profile` carrying
+    `Authorization: Bearer <seeded access token>`.
+  - Assert that a full backend body (fractional-second dates, `image: null`)
+    decodes into the expected `AccountProfile`.
+  - Assert that a 401 body rethrows as `HTTPRequestClient.Error.badResponse`
+    with status 401 and leaves `@Shared(.authSession)` unchanged.
+  - Run `mise exec -- tuist generate --no-open` and
+    `mise exec -- tuist build --platform ios`.
+
 ## Completed
 
 Shipped and merged; kept as a short record so the work is not re-proposed.
