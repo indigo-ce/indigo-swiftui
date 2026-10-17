@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Components
 import Core
+import HTTPRequestClient
 import OSLog
 import SwiftUI
 
@@ -31,6 +32,13 @@ public struct AuthFeature: Sendable {
     // Set when a sign-up succeeded. Signing up does not sign in — see
     // `SessionClient`.
     public var signUpSuccess = false
+    // The address a sign-in was refused for as unverified, and whether a
+    // resend of the verification email for it has succeeded. Cleared whenever
+    // the form stops showing that address (a mode switch, an email edit, or a
+    // new sign-in submission) so the resend button never targets an address
+    // the user can no longer see.
+    public var unverifiedEmail: String?
+    public var verificationEmailSent = false
     // The forgot-password sheet, offered in sign-in mode and seeded with the
     // email already typed.
     @Presents public var forgotPassword: ForgotPasswordFeature.State?
@@ -61,6 +69,9 @@ public struct AuthFeature: Sendable {
     case signInResponse
     case signUpResponse
     case failed(String)
+    case emailNotVerified(email: String, message: String)
+    case resendVerificationEmailButtonTapped
+    case verificationEmailSent
     case forgotPasswordButtonTapped
     case forgotPassword(PresentationAction<ForgotPasswordFeature.Action>)
   }
@@ -74,6 +85,13 @@ public struct AuthFeature: Sendable {
       case .binding(\.mode):
         state.errorMessage = nil
         state.signUpSuccess = false
+        state.unverifiedEmail = nil
+        state.verificationEmailSent = false
+        return .none
+
+      case .binding(\.email):
+        state.unverifiedEmail = nil
+        state.verificationEmailSent = false
         return .none
 
       case .binding:
@@ -87,8 +105,12 @@ public struct AuthFeature: Sendable {
           guard !state.email.isEmpty, !state.password.isEmpty else { return .none }
           state.isLoading = true
           // Starting a fresh attempt clears the previous attempt's error, so a
-          // retry that succeeds never shows it next to the confirmation.
+          // retry that succeeds never shows it next to the confirmation. It
+          // also drops a stale unverified-email state: the resend button must
+          // never target an address the form no longer shows.
           state.errorMessage = nil
+          state.unverifiedEmail = nil
+          state.verificationEmailSent = false
           let email = state.email
           let password = state.password
           return .run { send in
@@ -97,7 +119,13 @@ public struct AuthFeature: Sendable {
               await send(.signInResponse)
             } catch {
               logger.error("Sign-in failed: \(error, privacy: .public)")
-              await send(.failed(AuthFeature.errorMessage(from: error)))
+              if AuthFeature.isEmailNotVerified(error) {
+                await send(
+                  .emailNotVerified(email: email, message: AuthFeature.errorMessage(from: error))
+                )
+              } else {
+                await send(.failed(AuthFeature.errorMessage(from: error)))
+              }
             }
           }
 
@@ -142,6 +170,31 @@ public struct AuthFeature: Sendable {
         state.errorMessage = message
         return .none
 
+      case .emailNotVerified(let email, let message):
+        state.isLoading = false
+        state.errorMessage = message
+        state.unverifiedEmail = email
+        return .none
+
+      case .resendVerificationEmailButtonTapped:
+        guard !state.isLoading, let email = state.unverifiedEmail else { return .none }
+        state.isLoading = true
+        state.errorMessage = nil
+        return .run { send in
+          do {
+            try await sessionClient.sendVerificationEmail(email)
+            await send(.verificationEmailSent)
+          } catch {
+            logger.error("Verification-email resend failed: \(error, privacy: .public)")
+            await send(.failed(AuthFeature.errorMessage(from: error)))
+          }
+        }
+
+      case .verificationEmailSent:
+        state.isLoading = false
+        state.verificationEmailSent = true
+        return .none
+
       case .forgotPasswordButtonTapped:
         // Sign-in mode only, and never mid-request: a half-typed sign-up or an
         // in-flight attempt is not a reset request for the typed email.
@@ -166,6 +219,15 @@ public struct AuthFeature: Sendable {
       return body.error
     }
     return String(localized: "Something went wrong. Please try again.")
+  }
+
+  /// Whether `error` is a sign-in refused because the account's email is not
+  /// verified — the refusal `sendVerificationEmail` is the recovery path for.
+  /// The backend sends no stable `code` for this case, so the exact message is
+  /// the only discriminator.
+  static func isEmailNotVerified(_ error: any Error) -> Bool {
+    guard case HTTPRequestClient.Error.badResponse(_, 401, _) = error else { return false }
+    return APIErrorBody.from(error)?.error == "Email not verified"
   }
 }
 
@@ -239,6 +301,17 @@ public struct AuthView: View {
 
       if let errorMessage = store.errorMessage {
         InlineNotice.error(verbatim: errorMessage)
+      }
+
+      if store.mode == .signIn, store.unverifiedEmail != nil, !store.verificationEmailSent {
+        Button("Resend verification email") {
+          store.send(.resendVerificationEmailButtonTapped)
+        }
+        .disabled(store.isLoading)
+      }
+
+      if store.mode == .signIn, store.verificationEmailSent {
+        InlineNotice("Verification email sent. Check your inbox, then sign in.")
       }
     }
     .sheet(item: $store.scope(state: \.forgotPassword, action: \.forgotPassword)) {

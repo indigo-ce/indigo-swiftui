@@ -369,7 +369,10 @@ Tokens live in two layers, and the library keeps them in lockstep:
   Two more unauthenticated account-entry operations complete the set:
   `.sendVerificationEmail(email)` re-sends the verification link
   (`POST /api/v1/auth/send-verification-email`) — the operation to offer
-  when `signIn` answers 401 `Email not verified` — and
+  when `signIn` answers 401 `Email not verified`; the shipped call site is
+  `AuthFeature`'s "Resend verification email" button, which a sign-in
+  refused as unverified reveals for the refused address and which a
+  successful resend replaces with a check-your-inbox notice — and
   `.resetPassword(token, newPassword)` redeems the reset token
   `requestPasswordReset` emailed out (`POST /api/v1/auth/reset-password`).
   Resetting a password does **not** create a session: the user still goes
