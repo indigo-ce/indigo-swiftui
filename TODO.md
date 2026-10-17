@@ -9,46 +9,7 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
-### 1. Cancel the in-flight notes fetch when the user cache is wiped
-
-- [x] **Gap.** `NotesListFeature`'s `.onAppear` fetch is not cancellable.
-      When a session change starts `RootFeature.wipeUserCache`, a fetch
-      that began earlier (the list's first `.task`, or the refetch after a
-      save or delete) can still deliver `.notesLoaded` with the previous
-      account's rows after `.userCacheWiped` or `.userCacheWipeFailed` has
-      reset `notesList`. On success the stale rows show until the next
-      fetch; on failure they come back even though `.userCacheWipeFailed`
-      exists to hide them.
-- **Desired behavior.** A wipe supersedes any notes fetch issued before
-  it. Only a fetch started after the reset can populate the list.
-- **Scope.**
-  - `NotesListFeature/Sources/NotesListView.swift`: add a public
-    `enum CancelID: Hashable, Sendable { case fetch }` and mark the
-    `.onAppear` effect `.cancellable(id: CancelID.fetch, cancelInFlight:
-    true)`, so overlapping refetches also collapse to the latest one.
-  - `RootFeature/Sources/RootView.swift`: `wipeUserCache` cancels
-    `NotesListFeature.CancelID.fetch` before it starts the delete (for
-    example `.merge(.cancel(id:), .run { … })`). `.userCacheWipeFailed`
-    also returns `.cancel(id: NotesListFeature.CancelID.fetch)` in place
-    of `.none`. Add a short comment on why: a pre-wipe read must not
-    repopulate the reset list.
-- **Dependencies.** None.
-- **Acceptance.** A new `RootFeatureTests` case sets a `notesClient.fetchAll`
-  that suspends until the test releases it (for example on an
-  `AsyncStream` or a checked continuation the test holds) and then returns
-  a previous-account note. Start that fetch with `.notesList(.onAppear)`,
-  send `.sessionChanged(nil)`, let the wipe finish, then release the fetch.
-  `store.state.notesList.notes` never contains the stale note, and the
-  test finishes with no unexpected `.notesLoaded` carrying it. A second
-  case covers the same ordering through `.userCacheWipeFailed` (closed
-  database, as in `wipeFailureKeepsTheMarkerAndHidesTheRows`). The
-  existing `RootFeatureTests` and `NotesListFeatureTests` pass unchanged.
-- **Validation.** `mise exec -- tuist generate --no-open`, then
-  `mise exec -- tuist build --platform ios` and
-  `mise exec -- tuist build --platform macos`; tests via
-  `mise exec -- tuist test --platform macos` where possible, otherwise CI.
-
-### 2. Offer a verification-email resend when sign-in is refused as unverified
+### 1. Offer a verification-email resend when sign-in is refused as unverified
 
 - [ ] **Gap.** When the backend requires email verification, `POST
       /api/v1/auth/sign-in` answers 401 with `{"error":"Email not verified"}`.
@@ -61,7 +22,8 @@ do not rely on a simulator run.
   address. A successful resend replaces the button with a "check your email"
   notice. A failed resend surfaces the server's message the way other
   failures do. Other sign-in failures behave as they do today.
-- **Scope.** `AuthFeature/Sources/AuthView.swift` only, plus tests.
+- **Scope.** `AuthFeature/Sources/AuthView.swift`, its tests, and one
+  sentence in `docs/api-clients.md`.
   - Add `static func isEmailNotVerified(_ error: any Error) -> Bool`. It
     returns `true` only for `HTTPRequestClient.Error.badResponse` with
     status 401 whose `APIErrorBody.from(error)?.error` is
@@ -88,7 +50,12 @@ do not rely on a simulator run.
     `verificationEmailSent` is false, show a "Resend verification email"
     button disabled while loading. When `verificationEmailSent` is true, show
     `InlineNotice("Verification email sent. Check your inbox, then sign in.")`.
-- **Dependencies.** None. Independent of item 1.
+  - `docs/api-clients.md`: where the account-entry bullet calls
+    `.sendVerificationEmail(email)` "the operation to offer when `signIn`
+    answers 401 `Email not verified`", name `AuthFeature`'s resend button
+    as the shipped call site, the way the same section names `RootFeature`
+    for `signOut`.
+- **Dependencies.** None.
 - **Acceptance.** New `AuthFeatureTests` cases:
   - A 401 `Email not verified` sign-in sets `errorMessage` and
     `unverifiedEmail`.
@@ -147,3 +114,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Add an `AuthFeature` module with sign-in and sign-up forms
 - [x] Present `AuthFeature` from `RootFeature` and ship a sign-out control
 - [x] Add a forgot-password sheet to `AuthFeature`
+- [x] Cancel the in-flight notes fetch when the user cache is wiped
