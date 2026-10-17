@@ -309,7 +309,7 @@ private final class AuthStubProtocol: URLProtocol {
   }
 
   /// Signing in over an existing session is an account switch: the displaced
-  /// refresh token must be revoked before the save overwrites it, or it stays
+  /// refresh token must be revoked once the save overwrites it, or it stays
   /// live on the server with no device copy left to revoke later.
   @Test func signInDisplacesAnExistingSessionAndRevokesItsRefreshToken() async throws {
     let saves = try await signIn(seedTokens: true)
@@ -370,6 +370,21 @@ private final class AuthStubProtocol: URLProtocol {
         keychainSave: { _, _ in throw URLError(.badURL) }
       )
     }
+  }
+
+  /// A failed save keeps the displaced session, so its refresh token must
+  /// stay live on the server: revoking first would leave the device holding
+  /// a session the server no longer honors.
+  @Test func signInKeychainFailureKeepsTheDisplacedSessionUnrevoked() async throws {
+    await #expect(throws: URLError(.badURL).self) {
+      _ = try await signIn(
+        seedTokens: true,
+        keychainSave: { _, _ in throw URLError(.badURL) }
+      )
+    }
+    #expect(AuthStubProtocol.requests.map(\.path) == ["/api/v1/auth/sign-in"])
+    @Shared(.authSession) var session: AuthSession?
+    #expect(session?.tokens == AuthTokens(access: "a-old", refresh: "r-old"))
   }
 
   // MARK: Sign-up and password-reset request
