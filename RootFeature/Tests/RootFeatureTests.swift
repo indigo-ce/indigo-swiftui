@@ -378,6 +378,110 @@ extension RootFeatureTests {
     #expect(store.state.notesList.notes.isEmpty)
   }
 
+  /// A fetch issued before the wipe must not repopulate the reset list: the
+  /// wipe cancels the in-flight notes fetch, so releasing the stale fetch
+  /// after `.userCacheWiped` delivers nothing. Only the post-wipe fetch can
+  /// populate the list.
+  @Test func wipeCancelsTheInFlightNotesFetch() async {
+    let staleNote = Note(title: "Previous account's note")
+    let (fetchStarted, fetchStartedContinuation) =
+      AsyncStream<CheckedContinuation<[Note], Never>>.makeStream()
+    // Only the first fetch (the pre-wipe one) suspends; the post-wipe
+    // refetch resolves immediately.
+    let fetchCalls = Mutex(0)
+
+    let state = RootFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = try! appDatabase()
+      $0.notesClient.fetchAll = {
+        if fetchCalls.withLock({ $0 }) == 0 {
+          fetchCalls.withLock { $0 += 1 }
+          return await withCheckedContinuation { continuation in
+            fetchStartedContinuation.yield(continuation)
+          }
+        }
+        return []
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.notesList(.onAppear))
+
+    var staleFetchContinuation: CheckedContinuation<[Note], Never>?
+    for await continuation in fetchStarted {
+      staleFetchContinuation = continuation
+      break
+    }
+
+    await store.send(.sessionChanged(nil))
+    await store.receive(\.userCacheWiped)
+    await store.receive(\.notesList.onAppear)
+    await store.receive(\.notesList.notesLoaded)
+    // The reset list stays empty until the post-wipe fetch lands.
+    #expect(store.state.notesList.notes.isEmpty)
+
+    // Releasing the pre-wipe fetch must not repopulate the list: its effect
+    // was cancelled at the wipe, so its `.notesLoaded` send is dropped.
+    staleFetchContinuation?.resume(returning: [staleNote])
+    await store.finish()
+
+    #expect(store.state.notesList.notes.isEmpty)
+  }
+
+  /// The same guarantee when the wipe fails: `.userCacheWipeFailed` hides the
+  /// rows, and an in-flight pre-wipe fetch must not bring them back.
+  @Test func wipeFailureCancelsTheInFlightNotesFetch() async throws {
+    let database = try appDatabase()
+    try await database.write { db in
+      try Note.insert { Note.Draft(Note(title: "Undeletable note")) }.execute(db)
+    }
+    // A closed queue makes every write throw.
+    try database.close()
+
+    let staleNote = Note(title: "Previous account's note")
+    let (fetchStarted, fetchStartedContinuation) =
+      AsyncStream<CheckedContinuation<[Note], Never>>.makeStream()
+
+    let state = RootFeature.State()
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = database
+      $0.notesClient.fetchAll = {
+        await withCheckedContinuation { continuation in
+          fetchStartedContinuation.yield(continuation)
+        }
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.notesList(.onAppear))
+
+    var staleFetchContinuation: CheckedContinuation<[Note], Never>?
+    for await continuation in fetchStarted {
+      staleFetchContinuation = continuation
+      break
+    }
+
+    await store.send(.sessionChanged(nil))
+    await store.receive(\.userCacheWipeFailed)
+
+    #expect(store.state.lastSignedInUserId == "a")
+    #expect(store.state.notesList.notes.isEmpty)
+
+    // Releasing the pre-wipe fetch must not repopulate the hidden list.
+    staleFetchContinuation?.resume(returning: [staleNote])
+    await store.finish()
+
+    #expect(store.state.notesList.notes.isEmpty)
+  }
+
   @Test func plainLaunchLeavesCachedRowsIntact() async throws {
     let database = try appDatabase()
     try await database.write { db in

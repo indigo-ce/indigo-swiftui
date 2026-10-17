@@ -11,7 +11,7 @@ do not rely on a simulator run.
 
 ### 1. Cancel the in-flight notes fetch when the user cache is wiped
 
-- [ ] **Gap.** `NotesListFeature`'s `.onAppear` fetch is not cancellable.
+- [x] **Gap.** `NotesListFeature`'s `.onAppear` fetch is not cancellable.
       When a session change starts `RootFeature.wipeUserCache`, a fetch
       that began earlier (the list's first `.task`, or the refetch after a
       save or delete) can still deliver `.notesLoaded` with the previous
