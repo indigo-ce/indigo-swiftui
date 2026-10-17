@@ -92,15 +92,23 @@ extension SessionClient: DependencyKey {
 
       // Signing in can also switch accounts: the save below overwrites the
       // previous session, and its refresh token would stay live on the
-      // server with no copy left on the device to revoke later. Capture and
-      // revoke it first — the same reason `signOut` revokes before destroy.
-      if let displacedRefresh = session?.tokens?.refresh {
-        await revokeRefreshToken(displacedRefresh)
-      }
+      // server with no copy left on the device to revoke later. Capture it
+      // before the save, but revoke only once the save has succeeded: a
+      // failed save leaves the previous session in place, and revoking first
+      // would leave it holding a refresh token the server no longer honors.
+      let displacedRefresh = session?.tokens?.refresh
 
       try await authTokensClient.save(
         AuthTokens(access: response.accessToken, refresh: response.refreshToken)
       )
+
+      // The save just published `.valid`, which dismisses the sign-in sheet
+      // and cancels the effect running this closure. Revoke from an
+      // unstructured task: it keeps the current dependencies but not the
+      // cancellation, so the request still reaches the server.
+      if let displacedRefresh {
+        await Task { await revokeRefreshToken(displacedRefresh) }.value
+      }
     },
     signOut: {
       @Dependency(\.authTokensClient) var authTokensClient
