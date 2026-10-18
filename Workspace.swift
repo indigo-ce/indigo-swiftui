@@ -7,6 +7,7 @@ let workspace = Workspace(
     "App",
     "Core",
     "Components",
+    "AccountFeature",
     "AuthFeature",
     "NoteEditorFeature",
     "NotesListFeature",
@@ -24,6 +25,9 @@ let workspace = Workspace(
           .testableTarget(target: .project(path: "App", target: "\(appTarget.targetName)Tests")),
           .testableTarget(target: .project(path: "Core", target: "CoreTests")),
           .testableTarget(target: .project(path: "Components", target: "ComponentsTests")),
+          .testableTarget(
+            target: .project(path: "AccountFeature", target: "AccountFeatureTests")
+          ),
           .testableTarget(
             target: .project(path: "AuthFeature", target: "AuthFeatureTests")
           ),
