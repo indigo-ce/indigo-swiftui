@@ -9,53 +9,6 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
-- [ ] **Add an `AccountFeature` module that shows the signed-in profile**
-  - *Gap:* `AccountClient.fetchProfile` (`Core/Sources/Clients/AccountClient.swift`)
-    ships with tests but no feature calls it, so the template's one
-    `sendAuthenticated` example has no consumer. Signed in, the user sees
-    nothing about the account: the account button only offers a sign-out
-    confirmation.
-  - *Scope:* a new `AccountFeature/` framework built with `Project.framework`,
-    the way `AuthFeature/Project.swift` is: depends on `Core`, `Components`,
-    and `.indigoFoundation`; tests depend on `Core` and `.indigoFoundation`.
-    Register it in `Workspace.swift` (`projects` and the `AllTests` scheme)
-    and add it to the example-feature list in `AGENTS.md`. Do **not** present
-    it from `RootFeature` yet; that is the next item.
-  - *Reducer:* `@Reducer public struct AccountFeature` with
-    `@Dependency(\.accountClient)`. State holds `profile: AccountProfile?`,
-    `isLoading`, `errorMessage: String?`, and a `@Presents`
-    `confirmationDialog`. Actions: `task` (fetches the profile; ignored while
-    a fetch is running), `profileResponse`, `failed(String)`,
-    `retryButtonTapped`, `signOutButtonTapped`, the dialog action, and
-    `delegate(.signOutConfirmed)`. `task` keeps any profile already loaded
-    while it refetches. A failure keeps that profile and sets `errorMessage`.
-    Map failures with a `static func errorMessage(from:)` that matches
-    `AuthFeature.errorMessage(from:)`: the server's `APIErrorBody` message,
-    otherwise a generic fallback. A 401 shows its message and does **not**
-    sign out or touch the session; this matches the documented
-    `sendAuthenticated` contract.
-  - *Sign-out:* `signOutButtonTapped` presents a confirmation dialog with the
-    same title, message, and buttons as `ConfirmationDialogState.signOut` in
-    `RootView.swift`. Confirming it sends only `.delegate(.signOutConfirmed)`.
-    The feature never calls `sessionClient` itself, so the revoking sign-out
-    effect, its in-flight guard, and its failure alert stay in `RootFeature`.
-  - *View:* `AccountView` runs `.task { await store.send(.task).finish() }`.
-    It shows a `ProgressView` until the first profile arrives, then the name,
-    email, verified status, and member-since date
-    (`createdAt.formatted(date: .long, time: .omitted)`). On error it shows
-    `InlineNotice.error(verbatim:)` and a Retry button, and it ends with a
-    destructive "Sign Out" button.
-  - *Acceptance:* the profile is fetched once per `task`. A failed fetch
-    surfaces the server message and keeps any earlier profile. Retry fetches
-    again. Confirming sign-out emits only the delegate action. The feature has
-    no `sessionClient` dependency.
-  - *Validation:* `AccountFeatureTests` with a `TestStore` overriding
-    `accountClient.fetchProfile` should cover success, an `APIErrorBody` 401
-    failure, a transport failure falling back to the generic message, retry,
-    and the confirm-to-delegate path. Then run
-    `mise exec -- tuist generate --no-open` and
-    `mise exec -- tuist build --platform ios`.
-
 - [ ] **Present `AccountFeature` from `RootFeature` for signed-in users**
   - *Depends on:* the `AccountFeature` item above.
   - *Gap:* signed in, the notes-list account button opens only the sign-out
@@ -138,3 +91,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Cancel the in-flight notes fetch when the user cache is wiped
 - [x] Offer a verification-email resend when sign-in is refused as unverified
 - [x] Ship an `AccountClient` that fetches the signed-in profile
+- [x] Add an `AccountFeature` module that shows the signed-in profile

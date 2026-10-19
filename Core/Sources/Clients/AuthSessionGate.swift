@@ -24,9 +24,17 @@ import Sharing
 ///   begun. Otherwise it is dropped: the session it would republish is being
 ///   destroyed. The server has already issued the dropped refresh token, so
 ///   the gated client revokes it best effort — otherwise it would stay live
-///   server-side with no copy left on the device to revoke later. The decision happens at save time — sign-out may destroy the
-///   stored credentials between staging and saving, and only the save-time
-///   check sees the final state.
+///   server-side with no copy left on the device to revoke later. The
+///   decision happens at save time — sign-out may destroy the stored
+///   credentials between staging and saving, and only the save-time check
+///   sees the final state.
+/// - Callers that shared one refresh flight each save its result, but only
+///   the first successful save writes: later ones skip the write once the
+///   rotation is known to be persisted, and are dropped (so revoked) once a
+///   destroy has discarded it. When a rotation reached memory
+///   through a failed save (the library publishes it before rethrowing), the
+///   next staged caller persists it as a repair instead of skipping — memory
+///   alone is never proof that the keychain holds the credentials.
 /// - A destroy runs to completion before any other write, and ends the
 ///   sign-out window.
 /// - Any other save is a fresh sign-in: it writes through and re-arms
@@ -41,8 +49,17 @@ actor AuthSessionGate: DependencyKey {
   static let previewValue = AuthSessionGate()
   static let testValue = AuthSessionGate()
 
-  /// New refresh token → the refresh token its rotation started from.
-  private var stagedSources: [String: String] = [:]
+  /// A rotation staged by the `refresh` closure: the refresh tokens its
+  /// rotation started from (one entry per staged caller) and whether any
+  /// caller has completed a keychain save of it yet.
+  private struct StagedRefresh {
+    var pendingSources: [String]
+    var isPersisted = false
+  }
+
+  /// New refresh token → its staged rotation. Callers sharing one refresh
+  /// flight each stage, and each of their saves consumes one entry.
+  private var stagedRefreshes: [String: StagedRefresh] = [:]
   private var isSignOutInProgress = false
 
   // A promise-style mutex: `publish` and `destroy` hold it across the awaited
@@ -59,7 +76,9 @@ actor AuthSessionGate: DependencyKey {
   /// is the refresh token the rotation started from; the publish decision
   /// re-checks it at save time.
   func stagePublish(newRefresh: String, sourceRefresh: String) {
-    stagedSources[newRefresh] = sourceRefresh
+    stagedRefreshes[newRefresh, default: StagedRefresh(pendingSources: [])]
+      .pendingSources
+      .append(sourceRefresh)
   }
 
   /// Marks the start of sign-out: from here until the destroy settles, no
@@ -70,8 +89,12 @@ actor AuthSessionGate: DependencyKey {
 
   /// Decides and performs a credential save under the gate's lock. A save
   /// completing a staged refresh is dropped once sign-out has begun or its
-  /// source refresh token is no longer the stored one; any other save is a
-  /// fresh sign-in and re-arms publication.
+  /// source refresh token is no longer the stored one; it is skipped after a
+  /// co-sharer has already persisted the same rotation; and it is performed
+  /// as a repair when the rotation is already in memory but no save has
+  /// succeeded yet (the library moves an unsaved rotation into memory when
+  /// its keychain save throws). Any other save is a fresh sign-in and
+  /// re-arms publication.
   ///
   /// - Returns: `false` when the save was dropped.
   @discardableResult
@@ -81,13 +104,44 @@ actor AuthSessionGate: DependencyKey {
   ) async throws -> Bool {
     await acquire()
     do {
-      if let source = stagedSources.removeValue(forKey: tokens.refresh) {
-        @Shared(.authSession) var session
-        let sourceIsCurrent = session?.tokens?.refresh == source
-        if isSignOutInProgress || !sourceIsCurrent {
+      if stagedRefreshes[tokens.refresh]?.pendingSources.isEmpty == false {
+        // Every path below, a failed save included, consumes one staged
+        // caller. The stored entry is updated in place, never through a
+        // copy written back: a caller sharing this flight may stage while
+        // the save below is suspended, and erasing its entry would let its
+        // publish pass as a fresh sign-in after sign-out's destroy.
+        let source = stagedRefreshes[tokens.refresh]!.pendingSources.removeFirst()
+        defer { finishStaged(forKey: tokens.refresh) }
+        if isSignOutInProgress {
           release()
           return false
         }
+        if stagedRefreshes[tokens.refresh]!.isPersisted {
+          // A caller that shared this refresh flight already persisted it.
+          // The write is only skipped while the session still bears the
+          // rotation — its tokens, or the source it rotated from while
+          // memory lags the save. Once destruction has discarded both, the
+          // drop sends the gated client after the rotated token: sign-out
+          // only ever revoked the source, and the replacement must not stay
+          // live server-side with no copy left on the device.
+          @Shared(.authSession) var session
+          let stillHeld =
+            session?.tokens == tokens
+            || session?.tokens?.refresh == source
+          release()
+          return stillHeld
+        }
+        @Shared(.authSession) var session
+        let sourceIsCurrent = session?.tokens?.refresh == source
+        let memoryHasRotation = session?.tokens == tokens
+        guard sourceIsCurrent || memoryHasRotation else {
+          release()
+          return false
+        }
+        try await persist()
+        stagedRefreshes[tokens.refresh]?.isPersisted = true
+        release()
+        return true
       } else {
         // A save that completes no staged refresh is a fresh sign-in.
         isSignOutInProgress = false
@@ -115,6 +169,14 @@ actor AuthSessionGate: DependencyKey {
     }
     isSignOutInProgress = false
     release()
+  }
+
+  /// Drops a rotation once its last staged caller has published. An entry
+  /// that gained callers while a save was suspended stays.
+  private func finishStaged(forKey newRefresh: String) {
+    if stagedRefreshes[newRefresh]?.pendingSources.isEmpty == true {
+      stagedRefreshes[newRefresh] = nil
+    }
   }
 
   // MARK: Mutex
