@@ -22,8 +22,8 @@ Key advantages:
 Add these packages to your project:
 
 ```swift
-.package(url: "https://github.com/indigo-ce/http-request-client", from: "1.6.0"),
-.package(url: "https://github.com/indigo-ce/jwt-auth-client", from: "2.0.0"),
+.package(url: "https://github.com/indigo-stacks/http-request-client", from: "1.6.0"),
+.package(url: "https://github.com/indigo-stacks/jwt-auth-client", from: "2.0.0"),
 ```
 
 Import them in your client files:
