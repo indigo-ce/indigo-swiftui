@@ -10,9 +10,11 @@ multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
 - [ ] **Present `AccountFeature` from `RootFeature` for signed-in users**
-  - *Depends on:* the `AccountFeature` item above.
-  - *Gap:* signed in, the notes-list account button opens only the sign-out
-    dialog (`RootView.swift`, `.notesList(.delegate(.accountButtonTapped))`).
+  - *Gap:* the `AccountFeature` module has shipped but nothing presents it.
+    Signed in, the notes-list account button still opens only root's
+    sign-out dialog (`RootView.swift`,
+    `.notesList(.delegate(.accountButtonTapped))`), and the same dialog is now
+    duplicated in `AccountView.swift`.
   - *Scope:* add `AccountFeature` as a dependency of `RootFeature` in
     `RootFeature/Project.swift` (sources and tests), and give root state a
     `@Presents var account: AccountFeature.State?` with `.ifLet`. When
@@ -30,7 +32,8 @@ do not rely on a simulator run.
   - *Session changes:* `.sessionChanged(.missing)` and `.sessionChanged(nil)`
     also set `account = nil`, so a session that ends while the sheet is open
     (for example, a refresh rejected by the server) closes the sheet. A
-    `.valid` rotation for the same `sub` leaves the sheet open.
+    `.valid` rotation for the same `sub` leaves the sheet open, and so does
+    `.expired`, which `isAuthenticated` still counts as signed in.
   - *Docs:* in `docs/api-clients.md`, where it names `AccountClient` as the
     shipped `sendAuthenticated` call site, name `AccountFeature` as its
     consumer.
