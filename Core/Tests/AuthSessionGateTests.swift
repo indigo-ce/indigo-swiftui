@@ -1,4 +1,5 @@
 import Dependencies
+import Foundation
 import JWTAuth
 import Sharing
 import Testing
@@ -129,6 +130,40 @@ struct AuthSessionGateTests {
     let second = try await gate.publish(shared) { try await recorder.persist(shared) }
 
     #expect(first && second)
+    #expect(recorder.writes.value.count == 1)
+    #expect(Self.storedRefresh() == "r2")
+  }
+
+  /// When the first shared save throws, the library compensates by moving
+  /// the rotation into memory while restoring the old keychain. The next
+  /// caller sharing the flight must then still persist it — memory matching
+  /// alone is never proof that the keychain holds the credentials.
+  @Test func aFailedSharedSaveLetsTheNextCallerRetryPersistence() async throws {
+    Self.seed(AuthTokens(access: "a", refresh: "r"))
+    let gate = AuthSessionGate()
+    let recorder = Self.makeRecorder()
+    let shared = AuthTokens(access: "a2", refresh: "r2")
+
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+
+    // The first save fails on the transport; the recorder only counts
+    // completed writes.
+    do {
+      try await gate.publish(shared) {
+        throw URLError(.networkConnectionLost)
+      }
+      Issue.record("Expected the failing save to rethrow")
+    } catch is URLError {
+      // Expected.
+    }
+
+    // The library's compensation has published the rotation to memory while
+    // the keychain kept the old credentials — the next caller must write.
+    Self.seed(shared)
+    let second = try await gate.publish(shared) { try await recorder.persist(shared) }
+
+    #expect(second)
     #expect(recorder.writes.value.count == 1)
     #expect(Self.storedRefresh() == "r2")
   }

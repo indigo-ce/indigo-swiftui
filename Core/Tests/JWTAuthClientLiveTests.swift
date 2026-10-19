@@ -124,10 +124,12 @@ private final class RefreshStubProtocol: URLProtocol {
     #expect(a == b)
   }
 
-  /// A completed flight is never shared: success replaced the tokens callers
-  /// hold, and a transient failure must be retried with a fresh request.
-  @Test func aCompletedFlightDoesNotShareWithLaterRefreshes() async throws {
-    let tokens = AuthTokens(access: "expired-access", refresh: "retried-refresh")
+  /// A completed rotation is retained: a caller still holding the spent
+  /// source token receives its replacement instead of re-sending a token
+  /// the backend has already consumed (which would be rejected with 401 and
+  /// mapped to `refreshRejected`, wiping a valid session).
+  @Test func aCompletedRotationIsReusedByLaterCallersOfTheSameToken() async throws {
+    let tokens = AuthTokens(access: "expired-access", refresh: "reused-refresh")
     RefreshStubProtocol.requestCount.setValue(0)
 
     let first = try await refresh(
@@ -135,14 +137,42 @@ private final class RefreshStubProtocol: URLProtocol {
       statusCode: 200,
       body: Data(#"{"accessToken":"a1","refreshToken":"r1"}"#.utf8)
     )
+    // The stub would now answer with different tokens; a caller that went
+    // back to the network would see them. The retained rotation wins instead.
     let second = try await refresh(
       tokens: tokens,
       statusCode: 200,
       body: Data(#"{"accessToken":"a2","refreshToken":"r2"}"#.utf8)
     )
 
-    #expect(RefreshStubProtocol.requestCount.value == 2)
-    #expect(first.access == "a1")
-    #expect(second.access == "a2")
+    #expect(RefreshStubProtocol.requestCount.value == 1)
+    #expect(first.access == "a1" && first.refresh == "r1")
+    #expect(second.access == "a1" && second.refresh == "r1")
+  }
+
+  /// A flight from a different source token retires the retained rotation:
+  /// the session has moved on, and a caller holding the older token can no
+  /// longer be racing with it.
+  @Test func aNewFlightFromAnotherTokenRetiresTheCompletedRotation() async throws {
+    RefreshStubProtocol.requestCount.setValue(0)
+
+    _ = try await refresh(
+      tokens: AuthTokens(access: "expired-access", refresh: "retired-refresh"),
+      statusCode: 200,
+      body: Data(#"{"accessToken":"a1","refreshToken":"r1"}"#.utf8)
+    )
+    _ = try await refresh(
+      tokens: AuthTokens(access: "expired-access", refresh: "next-refresh"),
+      statusCode: 200,
+      body: Data(#"{"accessToken":"a2","refreshToken":"r2"}"#.utf8)
+    )
+    let last = try await refresh(
+      tokens: AuthTokens(access: "expired-access", refresh: "retired-refresh"),
+      statusCode: 200,
+      body: Data(#"{"accessToken":"a3","refreshToken":"r3"}"#.utf8)
+    )
+
+    #expect(RefreshStubProtocol.requestCount.value == 3)
+    #expect(last.access == "a3")
   }
 }

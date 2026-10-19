@@ -83,7 +83,8 @@ extension JWTAuthClient: @retroactive DependencyKey {
 
 // MARK: - Refresh single flight
 
-/// Serializes refresh requests per source refresh token.
+/// Serializes refresh requests per source refresh token, and lets late
+/// callers reuse the completed rotation.
 ///
 /// The backend rotates refresh tokens and invalidates the old one
 /// immediately, with no grace window. Two refreshes racing from the same
@@ -92,40 +93,82 @@ extension JWTAuthClient: @retroactive DependencyKey {
 /// cancels one that is already refreshing — would hand the backend the same
 /// single-use token twice: the loser is definitively rejected with 401,
 /// which the shipped wiring maps to `refreshRejected`, destroying a session
-/// that was never invalid. While a refresh of a given source token is in
-/// flight, every other caller refreshing from that same token therefore
-/// awaits and shares its outcome instead of firing a second request. A
-/// refresh that has already ended is never shared: success replaced the
-/// tokens callers hold, and a transient failure must be retried with a
-/// fresh request.
+/// that was never invalid.
+///
+/// While a refresh of a given source token is in flight, every other caller
+/// refreshing from that same token therefore awaits and shares its outcome
+/// instead of firing a second request. And because the flight ends when the
+/// network answers — before the library has staged and saved the rotation —
+/// a completed rotation is retained: a caller still holding the spent source
+/// token receives its replacement instead of re-sending a token the backend
+/// has already consumed. A retained rotation retires as soon as a flight
+/// from a different source token begins, which is the earliest moment the
+/// session can have moved on to newer credentials. A failed flight is never
+/// retained: transient failures must be retried with a fresh request.
 ///
 /// The flight runs in its own task, so cancelling the caller that started it
 /// does not abandon a rotation the server may already have performed.
 final class RefreshSingleFlight: Sendable {
   static let shared = RefreshSingleFlight()
 
-  private let inFlight = Mutex<[String: Task<AuthTokens, any Error>]>([:])
+  private struct State {
+    var flights: [String: Task<AuthTokens, any Error>] = [:]
+    /// The most recent completed rotation, kept as (source token, result).
+    var completed: (source: String, result: AuthTokens)?
+  }
+
+  private let state = Mutex(State())
 
   func refresh(
     _ tokens: AuthTokens,
     perform: @escaping @Sendable (AuthTokens) async throws -> AuthTokens
   ) async throws -> AuthTokens {
-    // Look up and register under one lock, so two callers can never both
-    // miss and start separate flights. The task cannot reach its cleanup
-    // before the lock is released, so the entry is always registered before
-    // it is removed.
-    let flight = inFlight.withLock { flights in
-      if let existing = flights[tokens.refresh] {
-        return existing
-      }
-      let task = Task { () -> AuthTokens in
-        defer { _ = inFlight.withLock { $0.removeValue(forKey: tokens.refresh) } }
-        return try await perform(tokens)
-      }
-      flights[tokens.refresh] = task
-      return task
+    enum Admission {
+      case reused(AuthTokens)
+      case shared(Task<AuthTokens, any Error>)
     }
-    return try await flight.value
+
+    let admission: Admission = state.withLock { state in
+      // A flight from a different source token retires the retained
+      // rotation: the session has moved on to newer credentials, so no
+      // caller racing with the old one is possible anymore.
+      if let completed = state.completed, completed.source != tokens.refresh {
+        state.completed = nil
+      }
+      // Late caller holding the spent token: hand back the rotation that
+      // already answered for it — a fresh request could only fail.
+      if let completed = state.completed, completed.source == tokens.refresh {
+        return .reused(completed.result)
+      }
+      if let flight = state.flights[tokens.refresh] {
+        return .shared(flight)
+      }
+      let flight = Task { () -> AuthTokens in
+        // The flight entry goes as soon as the network has answered — a
+        // failed flight must be retryable, and a successful one lives on
+        // only through the retained rotation below.
+        defer {
+          self.state.withLock { state in
+            _ = state.flights.removeValue(forKey: tokens.refresh)
+          }
+        }
+        let result = try await perform(tokens)
+        self.state.withLock { state in
+          // Retain the rotation for late callers of this source token.
+          state.completed = (tokens.refresh, result)
+        }
+        return result
+      }
+      state.flights[tokens.refresh] = flight
+      return .shared(flight)
+    }
+
+    switch admission {
+    case .reused(let result):
+      return result
+    case .shared(let flight):
+      return try await flight.value
+    }
   }
 }
 
