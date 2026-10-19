@@ -136,49 +136,76 @@ struct AuthSessionGateTests {
 
   /// A caller that stages while another caller's save is suspended keeps its
   /// staging — the finished save must not erase it by writing back a stale
-  /// copy — so its publish, landing after sign-out's destroy, skips the
-  /// write instead of restoring the discarded credentials.
+  /// copy — and its publish, landing after sign-out's destroy, is dropped so
+  /// the gated client revokes the rotated token: sign-out only ever revoked
+  /// the source, and the replacement must not stay live server-side with no
+  /// copy left on the device.
   @Test func aStagingAppendedDuringASaveKeepsItsSignOutProtection() async throws {
     Self.seed(AuthTokens(access: "a", refresh: "r"))
     let gate = AuthSessionGate()
     let recorder = Self.makeRecorder()
     let shared = AuthTokens(access: "a2", refresh: "r2")
+    let revoked = LockIsolated<[String]>([])
 
     await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
 
-    // The first caller's save parks mid-write.
+    // The first caller's save parks mid-write. Only the first parks, so a
+    // regression that lets the second write fails below instead of hanging.
     let (saveStarted, saveStartedContinuation) =
       AsyncStream<CheckedContinuation<Void, Never>>.makeStream()
-    async let first = gate.publish(shared) {
-      await withCheckedContinuation { continuation in
-        saveStartedContinuation.yield(continuation)
+    let liveSaves = LockIsolated(0)
+    let client = AuthTokensClient.gated(
+      live: AuthTokensClient(
+        save: { tokens in
+          let isFirst = liveSaves.withValue {
+            $0 += 1
+            return $0 == 1
+          }
+          if isFirst {
+            await withCheckedContinuation { continuation in
+              saveStartedContinuation.yield(continuation)
+            }
+          }
+          try await recorder.persist(tokens)
+        },
+        destroy: {}
+      ),
+      revoke: { refresh in revoked.withValue { $0.append(refresh) } }
+    )
+
+    // The gated client resolves the gate when it runs, so every call must
+    // see this test's gate.
+    try await withDependencies {
+      $0.authSessionGate = gate
+    } operation: {
+      async let first: Void = client.save(shared)
+      var pendingContinuation: CheckedContinuation<Void, Never>?
+      for await continuation in saveStarted {
+        pendingContinuation = continuation
+        break
       }
-      try await recorder.persist(shared)
+
+      // While that save is suspended, a second caller stages its own, and
+      // sign-out begins.
+      await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+      await gate.beginSignOut()
+
+      pendingContinuation?.resume()
+      try await first
+
+      // Sign-out destroys the stored credentials, closing the sign-out
+      // window.
+      try await client.destroy()
+      Self.seed(nil)
+
+      // The second caller's save must be dropped so the gated client revokes
+      // the rotated token: the destroy wiped its only device copy, and
+      // sign-out never revoked it.
+      try await client.save(shared)
     }
-    var pendingContinuation: CheckedContinuation<Void, Never>?
-    for await continuation in saveStarted {
-      pendingContinuation = continuation
-      break
-    }
 
-    // While that save is suspended, a second caller stages its own, and
-    // sign-out begins.
-    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
-    await gate.beginSignOut()
-
-    pendingContinuation?.resume()
-    let firstResult = try await first
-
-    // Sign-out destroys the stored credentials, closing the sign-out window.
-    try await gate.destroy { Self.seed(nil) }
-
-    // The second caller's publish must not write: its rotation was saved by
-    // the first caller, and the destroy discarded those credentials.
-    let second = try await gate.publish(shared) { try await recorder.persist(shared) }
-
-    #expect(firstResult)
-    #expect(second)
     #expect(recorder.writes.value.count == 1)
+    #expect(revoked.value == ["r2"])
     #expect(Self.storedRefresh() == nil)
   }
 

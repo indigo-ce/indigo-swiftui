@@ -30,7 +30,8 @@ import Sharing
 ///   sees the final state.
 /// - Callers that shared one refresh flight each save its result, but only
 ///   the first successful save writes: later ones skip the write once the
-///   rotation is known to be persisted. When a rotation reached memory
+///   rotation is known to be persisted, and are dropped (so revoked) once a
+///   destroy has discarded it. When a rotation reached memory
 ///   through a failed save (the library publishes it before rethrowing), the
 ///   next staged caller persists it as a repair instead of skipping — memory
 ///   alone is never proof that the keychain holds the credentials.
@@ -117,8 +118,18 @@ actor AuthSessionGate: DependencyKey {
         }
         if stagedRefreshes[tokens.refresh]!.isPersisted {
           // A caller that shared this refresh flight already persisted it.
+          // The write is only skipped while the session still bears the
+          // rotation — its tokens, or the source it rotated from while
+          // memory lags the save. Once destruction has discarded both, the
+          // drop sends the gated client after the rotated token: sign-out
+          // only ever revoked the source, and the replacement must not stay
+          // live server-side with no copy left on the device.
+          @Shared(.authSession) var session
+          let stillHeld =
+            session?.tokens == tokens
+            || session?.tokens?.refresh == source
           release()
-          return true
+          return stillHeld
         }
         @Shared(.authSession) var session
         let sourceIsCurrent = session?.tokens?.refresh == source
