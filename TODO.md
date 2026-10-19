@@ -9,49 +9,6 @@ scoped to one focused pull request. Validate Swift changes with
 multi-platform targets, so `tuist build` requires an explicit `--platform`);
 do not rely on a simulator run.
 
-- [ ] **Present `AccountFeature` from `RootFeature` for signed-in users**
-  - *Gap:* the `AccountFeature` module has shipped but nothing presents it.
-    Signed in, the notes-list account button still opens only root's
-    sign-out dialog (`RootView.swift`,
-    `.notesList(.delegate(.accountButtonTapped))`), and the same dialog is now
-    duplicated in `AccountView.swift`.
-  - *Scope:* add `AccountFeature` as a dependency of `RootFeature` in
-    `RootFeature/Project.swift` (sources and tests), and give root state a
-    `@Presents var account: AccountFeature.State?` with `.ifLet`. When
-    `isAuthenticated`, the account button presents `account` instead of the
-    dialog. The `isSigningOut` guard still makes it present nothing. Show the
-    sheet in a `NavigationStack` with a Done button that sends
-    `.account(.dismiss)`, like the auth sheet does.
-  - *Sign-out handoff:* `.account(.presented(.delegate(.signOutConfirmed)))`
-    sets `account = nil` and starts the existing `sessionClient.signOut()`
-    effect with the existing `isSigningOut`, `signOutResponse`, and failure
-    `alert` handling, unchanged. Remove root's own `confirmationDialog` state
-    and action, the `ConfirmationDialog` enum, and the
-    `ConfirmationDialogState.signOut` extension, because the dialog now lives
-    in `AccountFeature`.
-  - *Session changes:* `.sessionChanged(.missing)` and `.sessionChanged(nil)`
-    also set `account = nil`, so a session that ends while the sheet is open
-    (for example, a refresh rejected by the server) closes the sheet. A
-    `.valid` rotation for the same `sub` leaves the sheet open, and so does
-    `.expired`, which `isAuthenticated` still counts as signed in.
-  - *Docs:* in `docs/api-clients.md`, where it names `AccountClient` as the
-    shipped `sendAuthenticated` call site, name `AccountFeature` as its
-    consumer.
-  - *Acceptance:* when signed in, the account button presents the account
-    sheet; when signed out, it still presents sign-in. Confirming sign-out in
-    the sheet dismisses it and calls `signOut` exactly once. A failed
-    sign-out still raises root's alert. The account button stays inert while
-    sign-out is in flight. An ended session dismisses the sheet.
-  - *Validation:* in `RootFeatureTests`, rewrite the four dialog-driven
-    sign-out tests (`accountButtonWithSessionPresentsTheSignOutDialog`,
-    `confirmingSignOutCallsSignOutOnceAndShowsNoAlert`,
-    `failedSignOutPresentsTheAlert`,
-    `accountButtonWhileSigningOutPresentsNothing`) to drive
-    `.account(.presented(.delegate(.signOutConfirmed)))`. Add tests for the
-    sheet closing on `.missing` and staying open on a same-`sub` `.valid`.
-    Then run `mise exec -- tuist generate --no-open` and
-    `mise exec -- tuist build --platform ios`.
-
 ## Completed
 
 Shipped and merged; kept as a short record so the work is not re-proposed.
@@ -95,3 +52,4 @@ Shipped and merged; kept as a short record so the work is not re-proposed.
 - [x] Offer a verification-email resend when sign-in is refused as unverified
 - [x] Ship an `AccountClient` that fetches the signed-in profile
 - [x] Add an `AccountFeature` module that shows the signed-in profile
+- [x] Present `AccountFeature` from `RootFeature` for signed-in users
