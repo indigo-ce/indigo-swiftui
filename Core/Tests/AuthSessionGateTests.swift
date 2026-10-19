@@ -134,6 +134,54 @@ struct AuthSessionGateTests {
     #expect(Self.storedRefresh() == "r2")
   }
 
+  /// A caller that stages while another caller's save is suspended keeps its
+  /// staging — the finished save must not erase it by writing back a stale
+  /// copy — so its publish, landing after sign-out's destroy, skips the
+  /// write instead of restoring the discarded credentials.
+  @Test func aStagingAppendedDuringASaveKeepsItsSignOutProtection() async throws {
+    Self.seed(AuthTokens(access: "a", refresh: "r"))
+    let gate = AuthSessionGate()
+    let recorder = Self.makeRecorder()
+    let shared = AuthTokens(access: "a2", refresh: "r2")
+
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+
+    // The first caller's save parks mid-write.
+    let (saveStarted, saveStartedContinuation) =
+      AsyncStream<CheckedContinuation<Void, Never>>.makeStream()
+    async let first = gate.publish(shared) {
+      await withCheckedContinuation { continuation in
+        saveStartedContinuation.yield(continuation)
+      }
+      try await recorder.persist(shared)
+    }
+    var pendingContinuation: CheckedContinuation<Void, Never>?
+    for await continuation in saveStarted {
+      pendingContinuation = continuation
+      break
+    }
+
+    // While that save is suspended, a second caller stages its own, and
+    // sign-out begins.
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    await gate.beginSignOut()
+
+    pendingContinuation?.resume()
+    let firstResult = try await first
+
+    // Sign-out destroys the stored credentials, closing the sign-out window.
+    try await gate.destroy { Self.seed(nil) }
+
+    // The second caller's publish must not write: its rotation was saved by
+    // the first caller, and the destroy discarded those credentials.
+    let second = try await gate.publish(shared) { try await recorder.persist(shared) }
+
+    #expect(firstResult)
+    #expect(second)
+    #expect(recorder.writes.value.count == 1)
+    #expect(Self.storedRefresh() == nil)
+  }
+
   /// When the first shared save throws, the library compensates by moving
   /// the rotation into memory while restoring the old keychain. The next
   /// caller sharing the flight must then still persist it — memory matching

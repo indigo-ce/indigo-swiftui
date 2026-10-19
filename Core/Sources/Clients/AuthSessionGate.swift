@@ -103,16 +103,19 @@ actor AuthSessionGate: DependencyKey {
   ) async throws -> Bool {
     await acquire()
     do {
-      if var staged = stagedRefreshes[tokens.refresh], !staged.pendingSources.isEmpty {
+      if stagedRefreshes[tokens.refresh]?.pendingSources.isEmpty == false {
         // Every path below, a failed save included, consumes one staged
-        // caller.
-        let source = staged.pendingSources.removeFirst()
-        defer { finishStaged(staged, forKey: tokens.refresh) }
+        // caller. The stored entry is updated in place, never through a
+        // copy written back: a caller sharing this flight may stage while
+        // the save below is suspended, and erasing its entry would let its
+        // publish pass as a fresh sign-in after sign-out's destroy.
+        let source = stagedRefreshes[tokens.refresh]!.pendingSources.removeFirst()
+        defer { finishStaged(forKey: tokens.refresh) }
         if isSignOutInProgress {
           release()
           return false
         }
-        if staged.isPersisted {
+        if stagedRefreshes[tokens.refresh]!.isPersisted {
           // A caller that shared this refresh flight already persisted it.
           release()
           return true
@@ -125,7 +128,7 @@ actor AuthSessionGate: DependencyKey {
           return false
         }
         try await persist()
-        staged.isPersisted = true
+        stagedRefreshes[tokens.refresh]?.isPersisted = true
         release()
         return true
       } else {
@@ -157,8 +160,12 @@ actor AuthSessionGate: DependencyKey {
     release()
   }
 
-  private func finishStaged(_ staged: StagedRefresh, forKey newRefresh: String) {
-    stagedRefreshes[newRefresh] = staged.pendingSources.isEmpty ? nil : staged
+  /// Drops a rotation once its last staged caller has published. An entry
+  /// that gained callers while a save was suspended stays.
+  private func finishStaged(forKey newRefresh: String) {
+    if stagedRefreshes[newRefresh]?.pendingSources.isEmpty == true {
+      stagedRefreshes[newRefresh] = nil
+    }
   }
 
   // MARK: Mutex

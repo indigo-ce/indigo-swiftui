@@ -241,6 +241,7 @@ import Foundation
 import HTTPRequestBuilder
 import HTTPRequestClient
 import JWTAuth
+import Sharing
 import Synchronization
 
 extension JWTAuthClient: @retroactive DependencyKey {
@@ -290,8 +291,18 @@ extension JWTAuthClient: @retroactive DependencyKey {
           // rethrow it untouched so the library KEEPS the tokens and a later
           // retry can succeed. Mapping these to `refreshRejected` would log the
           // user out on a momentary network blip — a real bug this contract fixes.
+          //
+          // A 401 is a verdict on the session only while the session still
+          // holds the rejected token. A caller suspended across a rotation
+          // can send a source token the backend has already consumed; its
+          // rejection says nothing about the newer credentials, and mapping
+          // it to `refreshRejected` would make the library destroy them.
+          // Rethrow it as a plain failure of that one request instead.
           if case .badResponse(_, 401, _) = error {
-            throw AuthTokens.Error.refreshRejected
+            @Shared(.authSession) var session
+            if session?.tokens?.refresh == tokens.refresh {
+              throw AuthTokens.Error.refreshRejected
+            }
           }
           throw error
         }
@@ -326,8 +337,11 @@ extension JWTAuthClient: @retroactive DependencyKey {
 /// token receives its replacement instead of re-sending a token the backend
 /// has already consumed. A retained rotation retires as soon as a flight
 /// from a different source token begins, which is the earliest moment the
-/// session can have moved on to newer credentials. A failed flight is never
-/// retained: transient failures must be retried with a fresh request.
+/// session can have moved on to newer credentials. A caller still holding
+/// the spent token after that gets the backend's 401, which the `refresh`
+/// closure surfaces as a plain failure because the session no longer holds
+/// that token. A failed flight is never retained: transient failures must
+/// be retried with a fresh request.
 ///
 /// The flight runs in its own task, so cancelling the caller that started it
 /// does not abandon a rotation the server may already have performed.
@@ -405,7 +419,7 @@ private struct TokenResponse: Decodable {
 }
 ```
 
-`RefreshTokenRequest` and `TokenResponse` are declared at the bottom of the shipped file; rename their fields to match your API. Keys are sent as declared — the date and key strategies in `JSONCoders.api` are the thing to adjust per backend. Keep the `stagePublish` call: it is required for as long as `.gated` is installed, and dropping it lets a refresh that lands mid-sign-out sign the user back in. Keep `RefreshSingleFlight` too: the backend's refresh tokens are single-use with no grace window, so two refreshes racing from the same source token would let the loser's definitive 401 wipe a valid session — while a refresh is in flight, any other caller refreshing from the same token shares its outcome instead, and a caller that arrives after the network answered but before the rotation was saved reuses the retained result rather than re-sending the spent token. Each sharing caller stages its own publish, and the gate writes the shared tokens once — unless that first save failed, in which case the next sharing caller persists them instead of trusting the in-memory session.
+`RefreshTokenRequest` and `TokenResponse` are declared at the bottom of the shipped file; rename their fields to match your API. Keys are sent as declared — the date and key strategies in `JSONCoders.api` are the thing to adjust per backend. Keep the `stagePublish` call: it is required for as long as `.gated` is installed, and dropping it lets a refresh that lands mid-sign-out sign the user back in. Keep `RefreshSingleFlight` too: the backend's refresh tokens are single-use with no grace window, so two refreshes racing from the same source token would let the loser's definitive 401 wipe a valid session — while a refresh is in flight, any other caller refreshing from the same token shares its outcome instead, and a caller that arrives after the network answered but before the rotation was saved reuses the retained result rather than re-sending the spent token. Keep the session check on the 401 as well: a caller that still sends a spent token after the session has rotated past it gets a plain failure for that request, not a `refreshRejected` that would destroy the newer credentials. Each sharing caller stages its own publish, and the gate writes the shared tokens once — unless that first save failed, in which case the next sharing caller persists them instead of trusting the in-memory session.
 
 The refresh request is sent on `networkSession` from `@Dependency(\.networkSession)` — the single `URLSession` every client under `Core/Sources/Clients` shares, declared in `Core/Sources/Clients/NetworkSession.swift`.
 

@@ -3,6 +3,7 @@ import Foundation
 import HTTPRequestBuilder
 import HTTPRequestClient
 import JWTAuth
+import Sharing
 import Synchronization
 
 // MARK: - Live implementation
@@ -65,8 +66,18 @@ extension JWTAuthClient: @retroactive DependencyKey {
           // rethrow it untouched so the library KEEPS the tokens and a later
           // retry can succeed. Mapping these to `refreshRejected` would log the
           // user out on a momentary network blip — a real bug this contract fixes.
+          //
+          // A 401 is a verdict on the session only while the session still
+          // holds the rejected token. A caller suspended across a rotation
+          // can send a source token the backend has already consumed; its
+          // rejection says nothing about the newer credentials, and mapping
+          // it to `refreshRejected` would make the library destroy them.
+          // Rethrow it as a plain failure of that one request instead.
           if case .badResponse(_, 401, _) = error {
-            throw AuthTokens.Error.refreshRejected
+            @Shared(.authSession) var session
+            if session?.tokens?.refresh == tokens.refresh {
+              throw AuthTokens.Error.refreshRejected
+            }
           }
           throw error
         }
@@ -103,8 +114,11 @@ extension JWTAuthClient: @retroactive DependencyKey {
 /// token receives its replacement instead of re-sending a token the backend
 /// has already consumed. A retained rotation retires as soon as a flight
 /// from a different source token begins, which is the earliest moment the
-/// session can have moved on to newer credentials. A failed flight is never
-/// retained: transient failures must be retried with a fresh request.
+/// session can have moved on to newer credentials. A caller still holding
+/// the spent token after that gets the backend's 401, which the `refresh`
+/// closure surfaces as a plain failure because the session no longer holds
+/// that token. A failed flight is never retained: transient failures must
+/// be retried with a fresh request.
 ///
 /// The flight runs in its own task, so cancelling the caller that started it
 /// does not abandon a rotation the server may already have performed.

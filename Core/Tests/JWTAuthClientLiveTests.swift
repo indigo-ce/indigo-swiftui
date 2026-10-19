@@ -2,6 +2,7 @@ import Dependencies
 import Foundation
 import HTTPRequestClient
 import JWTAuth
+import Sharing
 import Testing
 
 @testable import Core
@@ -66,8 +67,14 @@ private final class RefreshStubProtocol: URLProtocol {
     }
   }
 
+  private static func seed(_ tokens: AuthTokens?) {
+    @Shared(.authSession) var session
+    $session.withLock { $0 = tokens.map(AuthSession.valid) }
+  }
+
   @Test func refreshMaps401ToRefreshRejected() async {
     let tokens = AuthTokens(access: "expired-access", refresh: "expired-refresh")
+    Self.seed(tokens)
     do {
       _ = try await refresh(tokens: tokens, statusCode: 401)
       Issue.record("Expected AuthTokens.Error.refreshRejected, but refresh succeeded")
@@ -174,5 +181,26 @@ private final class RefreshStubProtocol: URLProtocol {
 
     #expect(RefreshStubProtocol.requestCount.value == 3)
     #expect(last.access == "a3")
+  }
+
+  /// A caller suspended across a rotation can send a source token the
+  /// backend has already consumed. Its 401 says nothing about the newer
+  /// credentials the session now holds, so it surfaces as a plain failure
+  /// instead of `refreshRejected`, which would make the library destroy
+  /// them.
+  @Test func aRejectedTokenTheSessionNoLongerHoldsDoesNotRejectTheSession() async {
+    Self.seed(AuthTokens(access: "newer-access", refresh: "newer-refresh"))
+    let spent = AuthTokens(access: "expired-access", refresh: "spent-refresh")
+    do {
+      _ = try await refresh(tokens: spent, statusCode: 401, body: Data("spent".utf8))
+      Issue.record("Expected the 401 failure to propagate, but refresh succeeded")
+    } catch let error as HTTPRequestClient.Error {
+      guard case .badResponse(_, 401, "spent") = error else {
+        Issue.record("Expected the original 401 badResponse, got \(error)")
+        return
+      }
+    } catch {
+      Issue.record("Expected the original 401 badResponse, got \(error)")
+    }
   }
 }
