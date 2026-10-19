@@ -1,3 +1,4 @@
+import AccountFeature
 import AuthFeature
 import ComposableArchitecture
 import Core
@@ -513,7 +514,7 @@ extension RootFeatureTests {
   /// same account — the signed-in state the account button sees. No `.task`
   /// is sent, so no launch bootstrap runs. `makeStore` does not set
   /// `sessionClient` because only the sign-out path ever calls it; tests that
-  /// confirm the dialog override `sessionClient.signOut` per test.
+  /// confirm the sheet's sign-out override `sessionClient.signOut` per test.
   private func makeSignedInStore(
     signOut: (@Sendable () async throws -> Void)? = nil
   ) -> TestStoreOf<RootFeature> {
@@ -542,15 +543,15 @@ extension RootFeatureTests {
     await store.send(.notesList(.delegate(.accountButtonTapped)))
 
     #expect(store.state.auth != nil)
-    #expect(store.state.confirmationDialog == nil)
+    #expect(store.state.account == nil)
   }
 
-  @Test func accountButtonWithSessionPresentsTheSignOutDialog() async {
+  @Test func accountButtonWithSessionPresentsTheAccountSheet() async {
     let store = makeSignedInStore()
 
     await store.send(.notesList(.delegate(.accountButtonTapped)))
 
-    #expect(store.state.confirmationDialog != nil)
+    #expect(store.state.account != nil)
     #expect(store.state.auth == nil)
   }
 
@@ -561,10 +562,11 @@ extension RootFeatureTests {
     }
 
     await store.send(.notesList(.delegate(.accountButtonTapped)))
-    await store.send(.confirmationDialog(.presented(.confirmSignOutButtonTapped)))
+    await store.send(.account(.presented(.delegate(.signOutConfirmed))))
     await store.receive(\.signOutResponse)
 
     #expect(signOutCalls.withLock { $0 } == 1)
+    #expect(store.state.account == nil)
     #expect(store.state.alert == nil)
     #expect(!store.state.isSigningOut)
   }
@@ -575,15 +577,16 @@ extension RootFeatureTests {
     }
 
     await store.send(.notesList(.delegate(.accountButtonTapped)))
-    await store.send(.confirmationDialog(.presented(.confirmSignOutButtonTapped)))
+    await store.send(.account(.presented(.delegate(.signOutConfirmed))))
     await store.receive(\.signOutResponse)
 
+    #expect(store.state.account == nil)
     #expect(store.state.alert != nil)
     #expect(!store.state.isSigningOut)
   }
 
   /// While a sign-out attempt is in flight, the account button presents
-  /// nothing: re-presenting the dialog would let a second confirm start a
+  /// nothing: re-presenting the sheet would let a second confirm start a
   /// second effect, whose stale failure response could raise the alert after
   /// a concurrent attempt already ended the session.
   @Test func accountButtonWhileSigningOutPresentsNothing() async {
@@ -596,7 +599,7 @@ extension RootFeatureTests {
     }
 
     await store.send(.notesList(.delegate(.accountButtonTapped)))
-    await store.send(.confirmationDialog(.presented(.confirmSignOutButtonTapped)))
+    await store.send(.account(.presented(.delegate(.signOutConfirmed))))
 
     var pendingContinuation: CheckedContinuation<Void, Never>?
     for await continuation in signOutStarted {
@@ -606,7 +609,7 @@ extension RootFeatureTests {
     #expect(store.state.isSigningOut)
 
     await store.send(.notesList(.delegate(.accountButtonTapped)))
-    #expect(store.state.confirmationDialog == nil)
+    #expect(store.state.account == nil)
     #expect(store.state.auth == nil)
     #expect(store.state.isSigningOut)
 
@@ -662,5 +665,50 @@ extension RootFeatureTests {
     #expect(store.state.auth == nil)
     let remaining = try await database.read { try Note.fetchAll($0) }
     #expect(remaining.isEmpty)
+  }
+
+  /// A session that ends while the account sheet is open closes it: the
+  /// profile on screen belongs to an identity that no longer exists (for
+  /// example, a refresh rejected by the server).
+  @Test func missingSessionClosesThePresentedAccountSheet() async {
+    var state = RootFeature.State()
+    state.authSession = .valid(tokens(sub: "a"))
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+    state.account = AccountFeature.State()
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = try! appDatabase()
+      $0.notesClient.fetchAll = { [] }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionChanged(.missing))
+    await store.receive(\.userCacheWiped)
+    await store.receive(\.notesList.onAppear)
+    await store.receive(\.notesList.notesLoaded)
+
+    #expect(store.state.account == nil)
+  }
+
+  /// An ordinary token rotation for the same account leaves the sheet alone:
+  /// the profile it shows is still this user's.
+  @Test func validSessionForTheSameAccountKeepsTheAccountSheetOpen() async {
+    var state = RootFeature.State()
+    state.authSession = .valid(tokens(sub: "a"))
+    state.$lastSignedInUserId.withLock { $0 = "a" }
+    state.account = AccountFeature.State()
+
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.defaultDatabase = try! appDatabase()
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.sessionChanged(.valid(tokens(sub: "a"))))
+
+    #expect(store.state.account != nil)
   }
 }

@@ -540,7 +540,7 @@ Tokens live in two layers, and the library keeps them in lockstep:
 
 ### Making Authenticated Requests
 
-Use `sendAuthenticated` for endpoints that require authentication. Take the shared session from `@Dependency(\.networkSession)` and pass it as `urlSession:` in every example below. The shipped example is `Core/Sources/Clients/AccountClient.swift`: its `fetchProfile` fetches `GET /api/v1/account/profile`, and it is the one live call site — every `SessionClient` route uses `send` because those requests run before a session exists or while tearing one down.
+Use `sendAuthenticated` for endpoints that require authentication. Take the shared session from `@Dependency(\.networkSession)` and pass it as `urlSession:` in every example below. The shipped example is `Core/Sources/Clients/AccountClient.swift`: its `fetchProfile` fetches `GET /api/v1/account/profile`, it is the one live call site, and `AccountFeature` (`AccountFeature/Sources/AccountView.swift`) is its consumer — every `SessionClient` route uses `send` because those requests run before a session exists or while tearing one down.
 
 ```swift
 @Dependency(\.networkSession) var networkSession

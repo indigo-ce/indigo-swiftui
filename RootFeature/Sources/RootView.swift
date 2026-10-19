@@ -1,3 +1,4 @@
+import AccountFeature
 import AuthFeature
 import ComposableArchitecture
 import Core
@@ -40,10 +41,12 @@ public struct RootFeature: Sendable {
     /// sign-in publishes — the feature never dismisses itself.
     @Presents public var auth: AuthFeature.State?
 
-    /// The sign-out confirmation, presented by the account button while a
-    /// session exists.
-    @Presents public var confirmationDialog:
-      ConfirmationDialogState<Action.ConfirmationDialog>?
+    /// The signed-in profile sheet, presented by the account button while a
+    /// session exists. It owns the sign-out confirmation and reports the
+    /// answer through `.delegate(.signOutConfirmed)`; the revoking
+    /// `sessionClient.signOut()` effect stays here, with the session
+    /// observer that must run it.
+    @Presents public var account: AccountFeature.State?
 
     /// Shown when `signOut` throws: destroying the local credentials is the
     /// only step that can fail, and a silent failure would leave the user
@@ -83,14 +86,9 @@ public struct RootFeature: Sendable {
     case userCacheWipeFailed
     case notesList(NotesListFeature.Action)
     case auth(PresentationAction<AuthFeature.Action>)
-    case confirmationDialog(PresentationAction<ConfirmationDialog>)
+    case account(PresentationAction<AccountFeature.Action>)
     case alert(PresentationAction<Never>)
     case signOutResponse(Result<Void, any Error>)
-
-    @CasePathable
-    public enum ConfirmationDialog: Equatable, Sendable {
-      case confirmSignOutButtonTapped
-    }
   }
 
   @Dependency(\.jwtAuthClient) var authClient
@@ -178,9 +176,17 @@ public struct RootFeature: Sendable {
           // its rows deleted out from under it.
           return wipeUserCache(pendingUserId: incomingUserId)
 
-        case .missing, .expired, nil:
-          // A session that has gone away or is no longer valid must not
-          // leave one account's cached rows behind.
+        case .missing, nil:
+          // A session that has gone away must not leave one account's cached
+          // rows behind, and the account sheet shows the profile of an
+          // identity that no longer exists — close it (for example, a
+          // refresh rejected by the server while the sheet is open).
+          state.account = nil
+          return wipeUserCache(pendingUserId: nil)
+
+        case .expired:
+          // `.expired` still counts as signed in (`isAuthenticated`), so the
+          // account sheet stays open; only the cached rows must not survive.
           return wipeUserCache(pendingUserId: nil)
         }
 
@@ -204,10 +210,10 @@ public struct RootFeature: Sendable {
       case .notesList(.delegate(.accountButtonTapped)):
         // Authentication is offered, not forced: the notes app must stay
         // usable without a backend, so the button presents the sign-in sheet
-        // when signed out and the sign-out confirmation when signed in.
+        // when signed out and the account sheet when signed in.
         guard !state.isSigningOut else { return .none }
         if state.isAuthenticated {
-          state.confirmationDialog = .signOut
+          state.account = AccountFeature.State()
         } else {
           state.auth = AuthFeature.State()
         }
@@ -216,8 +222,8 @@ public struct RootFeature: Sendable {
       case .notesList:
         return .none
 
-      case .confirmationDialog(.presented(.confirmSignOutButtonTapped)):
-        state.confirmationDialog = nil
+      case .account(.presented(.delegate(.signOutConfirmed))):
+        state.account = nil
         state.isSigningOut = true
         return .run { send in
           @Dependency(\.sessionClient) var sessionClient
@@ -245,12 +251,15 @@ public struct RootFeature: Sendable {
         }
         return .none
 
-      case .auth, .alert, .confirmationDialog:
+      case .auth, .alert, .account:
         return .none
       }
     }
     .ifLet(\.$auth, action: \.auth) {
       AuthFeature()
+    }
+    .ifLet(\.$account, action: \.account) {
+      AccountFeature()
     }
   }
 
@@ -315,31 +324,18 @@ public struct RootView: View {
           }
       }
     }
-    .confirmationDialog(
-      $store.scope(state: \.confirmationDialog, action: \.confirmationDialog)
-    )
-    .alert($store.scope(state: \.alert, action: \.alert))
-  }
-}
-
-// MARK: - Sign-out dialog
-
-extension ConfirmationDialogState where Action == RootFeature.Action.ConfirmationDialog {
-  /// The sign-out confirmation the account button presents while signed in.
-  static var signOut: Self {
-    ConfirmationDialogState {
-      TextState("Sign Out?")
-    } actions: {
-      ButtonState(role: .destructive, action: .confirmSignOutButtonTapped) {
-        TextState("Sign Out")
+    .sheet(item: $store.scope(state: \.account, action: \.account)) { accountStore in
+      NavigationStack {
+        AccountView(store: accountStore)
+          .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+              Button("Done") {
+                store.send(.account(.dismiss))
+              }
+            }
+          }
       }
-      ButtonState(role: .cancel) {
-        TextState("Cancel")
-      }
-    } message: {
-      TextState(
-        "Signing out (or switching accounts) wipes this account's cached notes from the device."
-      )
     }
+    .alert($store.scope(state: \.alert, action: \.alert))
   }
 }
