@@ -32,38 +32,67 @@ struct AccountFeatureTests {
   // MARK: Profile loading
 
   @Test
-  func taskFetchesTheProfileOnceAndShowsIt() async {
-    // The fetch parks on a continuation so the test can send a second
-    // `.task` while the first request is genuinely in flight.
-    let (fetchStarted, fetchStartedContinuation) =
-      AsyncStream<CheckedContinuation<AccountProfile, Never>>.makeStream()
+  func taskFetchesTheProfileAndShowsIt() async {
     let attempts = LockIsolated(0)
     let store = makeStore {
       attempts.withValue { $0 += 1 }
-      return await withCheckedContinuation { continuation in
-        fetchStartedContinuation.yield(continuation)
-      }
+      return profile
     }
 
     await store.send(.task) {
       $0.isLoading = true
     }
+    await store.receive(.profileResponse(profile)) {
+      $0.isLoading = false
+      $0.profile = profile
+    }
+    #expect(attempts.value == 1)
+  }
 
+  /// A `.task` while a fetch is still in flight supersedes it: the stale
+  /// fetch is cancelled (TCA drops its sends, so it can never land) and the
+  /// fresh fetch resolves the loading flag — a cancelled request can never
+  /// wedge the screen in its progress state.
+  @Test
+  func taskWhileAFetchIsInFlightSupersedesIt() async {
+    let (fetchStarted, fetchStartedContinuation) =
+      AsyncStream<CheckedContinuation<AccountProfile, Never>>.makeStream()
+    let attempts = LockIsolated(0)
+    let store = makeStore {
+      let attempt = attempts.withValue {
+        $0 += 1
+        return $0
+      }
+      if attempt == 1 {
+        return await withCheckedContinuation { continuation in
+          fetchStartedContinuation.yield(continuation)
+        }
+      }
+      return profile
+    }
+
+    await store.send(.task) {
+      $0.isLoading = true
+    }
     var pendingContinuation: CheckedContinuation<AccountProfile, Never>?
     for await continuation in fetchStarted {
       pendingContinuation = continuation
       break
     }
 
-    // A second `.task` while the first fetch is in flight is ignored.
+    // The second `.task` starts while the first fetch is in flight. Loading
+    // is already true, so no state changes.
     await store.send(.task)
-
-    pendingContinuation?.resume(returning: profile)
     await store.receive(.profileResponse(profile)) {
       $0.isLoading = false
       $0.profile = profile
     }
-    #expect(attempts.value == 1)
+
+    // Resuming the superseded fetch changes nothing observable: its sends
+    // are dropped with the cancelled effect.
+    pendingContinuation?.resume(returning: profile)
+    await store.finish()
+    #expect(attempts.value == 2)
   }
 
   @Test

@@ -63,17 +63,21 @@ public struct AccountFeature: Sendable {
 
   public init() {}
 
+  /// Identifies the in-flight profile fetch so overlapping fetches collapse
+  /// to the latest one via `cancelInFlight`, the way the notes fetch does.
+  private enum CancelID: Hashable, Sendable {
+    case fetch
+  }
+
   public var body: some ReducerOf<Self> {
     Reduce { state, action in
       switch action {
       case .retryButtonTapped:
-        // The same guarded fetch `.task` runs: while a fetch is in flight the
-        // retry affordance is already gone, and the guard keeps a stray tap
-        // from starting a second concurrent request.
+        // The same fetch `.task` runs; `cancelInFlight` collapses it with any
+        // still-running request, so retry never races a stale response.
         return .send(.task)
 
       case .task:
-        guard !state.isLoading else { return .none }
         state.isLoading = true
         state.errorMessage = nil
         return .run { send in
@@ -85,12 +89,17 @@ public struct AccountFeature: Sendable {
           } catch {
             // Dismissing the presenter mid-request cancels this effect; a
             // cancellation is not a request failure, so never log it as one
-            // or report it to the view that is already gone.
+            // or report an error to the view that is already gone. TCA drops
+            // every send from a cancelled effect, so the stale response can
+            // never land either — and because a new `.task` always starts a
+            // fresh fetch, a cancelled request can never wedge the loading
+            // flag (it is set unconditionally on the way in).
             guard !Task.isCancelled else { return }
             logger.error("Profile fetch failed: \(error, privacy: .public)")
             await send(.failed(AccountFeature.errorMessage(from: error)))
           }
         }
+        .cancellable(id: CancelID.fetch, cancelInFlight: true)
 
       case .profileResponse(let profile):
         state.isLoading = false
