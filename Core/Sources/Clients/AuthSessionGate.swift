@@ -27,6 +27,9 @@ import Sharing
 ///   server-side with no copy left on the device to revoke later. The decision happens at save time — sign-out may destroy the
 ///   stored credentials between staging and saving, and only the save-time
 ///   check sees the final state.
+/// - A save that completes a staged refresh whose tokens are already stored
+///   is a no-op: callers that shared one refresh flight each save its
+///   result, and only the first needs to write.
 /// - A destroy runs to completion before any other write, and ends the
 ///   sign-out window.
 /// - Any other save is a fresh sign-in: it writes through and re-arms
@@ -41,8 +44,10 @@ actor AuthSessionGate: DependencyKey {
   static let previewValue = AuthSessionGate()
   static let testValue = AuthSessionGate()
 
-  /// New refresh token → the refresh token its rotation started from.
-  private var stagedSources: [String: String] = [:]
+  /// New refresh token → the refresh token its rotation started from, once
+  /// per staged publish. Callers sharing one refresh flight each stage, and
+  /// each of their saves consumes one entry.
+  private var stagedSources: [String: [String]] = [:]
   private var isSignOutInProgress = false
 
   // A promise-style mutex: `publish` and `destroy` hold it across the awaited
@@ -59,7 +64,7 @@ actor AuthSessionGate: DependencyKey {
   /// is the refresh token the rotation started from; the publish decision
   /// re-checks it at save time.
   func stagePublish(newRefresh: String, sourceRefresh: String) {
-    stagedSources[newRefresh] = sourceRefresh
+    stagedSources[newRefresh, default: []].append(sourceRefresh)
   }
 
   /// Marks the start of sign-out: from here until the destroy settles, no
@@ -81,8 +86,13 @@ actor AuthSessionGate: DependencyKey {
   ) async throws -> Bool {
     await acquire()
     do {
-      if let source = stagedSources.removeValue(forKey: tokens.refresh) {
+      if let source = takeStagedSource(for: tokens.refresh) {
         @Shared(.authSession) var session
+        if session?.tokens == tokens {
+          // A caller that shared this refresh flight already published it.
+          release()
+          return true
+        }
         let sourceIsCurrent = session?.tokens?.refresh == source
         if isSignOutInProgress || !sourceIsCurrent {
           release()
@@ -115,6 +125,13 @@ actor AuthSessionGate: DependencyKey {
     }
     isSignOutInProgress = false
     release()
+  }
+
+  private func takeStagedSource(for newRefresh: String) -> String? {
+    guard var sources = stagedSources[newRefresh], !sources.isEmpty else { return nil }
+    let source = sources.removeFirst()
+    stagedSources[newRefresh] = sources.isEmpty ? nil : sources
+    return source
   }
 
   // MARK: Mutex

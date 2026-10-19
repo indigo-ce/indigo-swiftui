@@ -3,6 +3,8 @@ import Foundation
 import HTTPRequestBuilder
 import HTTPRequestClient
 import JWTAuth
+import Synchronization
+
 // MARK: - Live implementation
 
 // The template advertises "JWTAuth with automatic token refresh," so this is
@@ -29,46 +31,102 @@ extension JWTAuthClient: @retroactive DependencyKey {
   public static let liveValue = Self(
     baseURL: { host },
     refresh: { tokens in
-      @Dependency(\.httpRequestClient) var httpClient
-      @Dependency(\.networkSession) var networkSession
       @Dependency(\.authSessionGate) var gate
 
-      do {
-        let response: SuccessResponse<TokenResponse> = try await httpClient.send(
-          baseURL: host,
-          decoder: .api,
-          urlSession: networkSession
-        ) {
-          Path("api", "v1", "auth", "refresh-access")
-          post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
+      // Single-flight: while a refresh from these tokens is in flight, every
+      // other caller refreshing from the same tokens shares its outcome
+      // instead of racing a second single-use request — see
+      // `RefreshSingleFlight`.
+      let newTokens = try await RefreshSingleFlight.shared.refresh(tokens) { tokens in
+        @Dependency(\.httpRequestClient) var httpClient
+        @Dependency(\.networkSession) var networkSession
+
+        do {
+          let response: SuccessResponse<TokenResponse> = try await httpClient.send(
+            baseURL: host,
+            decoder: .api,
+            urlSession: networkSession
+          ) {
+            Path("api", "v1", "auth", "refresh-access")
+            post(RefreshTokenRequest(refreshToken: tokens.refresh), encoder: .api)
+          }
+          return AuthTokens(
+            access: response.value.accessToken,
+            refresh: response.value.refreshToken
+          )
+        } catch let error as HTTPRequestClient.Error {
+          // THE CONTRACT: only a definitive server rejection destroys the
+          // session. A 401 from /api/v1/auth/refresh-access means the refresh
+          // token is no longer valid — map it to `refreshRejected` so the
+          // library wipes the stored credentials and forces re-authentication.
+          //
+          // Every other failure (timeout, DNS, offline, 5xx, decoding error —
+          // `.invalidHTTPResponse`, `.decodingError`, `.other`) is transient:
+          // rethrow it untouched so the library KEEPS the tokens and a later
+          // retry can succeed. Mapping these to `refreshRejected` would log the
+          // user out on a momentary network blip — a real bug this contract fixes.
+          if case .badResponse(_, 401, _) = error {
+            throw AuthTokens.Error.refreshRejected
+          }
+          throw error
         }
-        let newTokens = AuthTokens(
-          access: response.value.accessToken,
-          refresh: response.value.refreshToken
-        )
-        // Record the publish the library is about to perform with these
-        // tokens, so a concurrent sign-out can veto it at save time — see
-        // `AuthSessionGate`.
-        await gate.stagePublish(newRefresh: newTokens.refresh, sourceRefresh: tokens.refresh)
-        return newTokens
-      } catch let error as HTTPRequestClient.Error {
-        // THE CONTRACT: only a definitive server rejection destroys the
-        // session. A 401 from /api/v1/auth/refresh-access means the refresh
-        // token is no longer valid — map it to `refreshRejected` so the
-        // library wipes the stored credentials and forces re-authentication.
-        //
-        // Every other failure (timeout, DNS, offline, 5xx, decoding error —
-        // `.invalidHTTPResponse`, `.decodingError`, `.other`) is transient:
-        // rethrow it untouched so the library KEEPS the tokens and a later
-        // retry can succeed. Mapping these to `refreshRejected` would log the
-        // user out on a momentary network blip — a real bug this contract fixes.
-        if case .badResponse(_, 401, _) = error {
-          throw AuthTokens.Error.refreshRejected
-        }
-        throw error
       }
+      // Record the publish the library is about to perform with these
+      // tokens, so a concurrent sign-out can veto it at save time — see
+      // `AuthSessionGate`. Every caller sharing a flight stages its own
+      // publish, because the library saves once per caller.
+      await gate.stagePublish(newRefresh: newTokens.refresh, sourceRefresh: tokens.refresh)
+      return newTokens
     }
   )
+}
+
+// MARK: - Refresh single flight
+
+/// Serializes refresh requests per source refresh token.
+///
+/// The backend rotates refresh tokens and invalidates the old one
+/// immediately, with no grace window. Two refreshes racing from the same
+/// source token — callers whose `sendAuthenticated` requests overlap while
+/// the access token is expired, for example when a superseding request
+/// cancels one that is already refreshing — would hand the backend the same
+/// single-use token twice: the loser is definitively rejected with 401,
+/// which the shipped wiring maps to `refreshRejected`, destroying a session
+/// that was never invalid. While a refresh of a given source token is in
+/// flight, every other caller refreshing from that same token therefore
+/// awaits and shares its outcome instead of firing a second request. A
+/// refresh that has already ended is never shared: success replaced the
+/// tokens callers hold, and a transient failure must be retried with a
+/// fresh request.
+///
+/// The flight runs in its own task, so cancelling the caller that started it
+/// does not abandon a rotation the server may already have performed.
+final class RefreshSingleFlight: Sendable {
+  static let shared = RefreshSingleFlight()
+
+  private let inFlight = Mutex<[String: Task<AuthTokens, any Error>]>([:])
+
+  func refresh(
+    _ tokens: AuthTokens,
+    perform: @escaping @Sendable (AuthTokens) async throws -> AuthTokens
+  ) async throws -> AuthTokens {
+    // Look up and register under one lock, so two callers can never both
+    // miss and start separate flights. The task cannot reach its cleanup
+    // before the lock is released, so the entry is always registered before
+    // it is removed.
+    let flight = inFlight.withLock { flights in
+      if let existing = flights[tokens.refresh] {
+        return existing
+      }
+      let task = Task { () -> AuthTokens in
+        defer { _ = inFlight.withLock { $0.removeValue(forKey: tokens.refresh) } }
+        return try await perform(tokens)
+      }
+      flights[tokens.refresh] = task
+      return task
+    }
+    return try await flight.value
+  }
 }
 
 // MARK: - Readability alias

@@ -116,6 +116,40 @@ struct AuthSessionGateTests {
     #expect(Self.storedRefresh() == "r2")
   }
 
+  @Test func callersSharingARefreshFlightWriteItOnce() async throws {
+    Self.seed(AuthTokens(access: "a", refresh: "r"))
+    let gate = AuthSessionGate()
+    let recorder = Self.makeRecorder()
+    let shared = AuthTokens(access: "a2", refresh: "r2")
+
+    // Two callers shared one rotation, so each stages and saves its result.
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    let first = try await gate.publish(shared) { try await recorder.persist(shared) }
+    let second = try await gate.publish(shared) { try await recorder.persist(shared) }
+
+    #expect(first && second)
+    #expect(recorder.writes.value.count == 1)
+    #expect(Self.storedRefresh() == "r2")
+  }
+
+  @Test func callersSharingARefreshFlightStayDroppedDuringSignOut() async throws {
+    Self.seed(AuthTokens(access: "a", refresh: "r"))
+    let gate = AuthSessionGate()
+    let recorder = Self.makeRecorder()
+    let shared = AuthTokens(access: "a2", refresh: "r2")
+
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    await gate.stagePublish(newRefresh: "r2", sourceRefresh: "r")
+    await gate.beginSignOut()
+    // The second save must not pass for a fresh sign-in and re-arm.
+    try await gate.publish(shared) { try await recorder.persist(shared) }
+    try await gate.publish(shared) { try await recorder.persist(shared) }
+
+    #expect(recorder.writes.value.isEmpty)
+    #expect(Self.storedRefresh() == "r")
+  }
+
   @Test func theGatedClientRevokesADroppedRefreshToken() async throws {
     Self.seed(AuthTokens(access: "a", refresh: "r"))
     let gate = AuthSessionGate()

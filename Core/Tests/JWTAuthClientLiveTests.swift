@@ -18,6 +18,7 @@ private final class RefreshStubProtocol: URLProtocol {
   }
 
   nonisolated(unsafe) static var stub = Stub(statusCode: 500, body: Data())
+  static let requestCount = LockIsolated(0)
 
   override class func canInit(with request: URLRequest) -> Bool {
     request.url?.host == URL(string: JWTAuthClient.host)?.host
@@ -29,6 +30,7 @@ private final class RefreshStubProtocol: URLProtocol {
 
   override func startLoading() {
     let stub = Self.stub
+    Self.requestCount.withValue { $0 += 1 }
     guard let url = request.url,
       let response = HTTPURLResponse(
         url: url,
@@ -92,5 +94,55 @@ private final class RefreshStubProtocol: URLProtocol {
     } catch {
       Issue.record("Expected the original 500 badResponse, got \(error)")
     }
+  }
+
+  /// Two callers refreshing from the same source token — for example a
+  /// profile fetch superseding one that is already refreshing — must share
+  /// the in-flight request: the backend rotates refresh tokens with no grace
+  /// window, so a second single-use request would be definitively rejected
+  /// with 401 and wipe a valid session.
+  @Test func concurrentRefreshesOfTheSameTokenShareOneFlight() async throws {
+    let coordinator = RefreshSingleFlight()
+    let flights = LockIsolated(0)
+    let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+    let perform: @Sendable (AuthTokens) async throws -> AuthTokens = { _ in
+      flights.withValue { $0 += 1 }
+      for await _ in release { break }
+      return AuthTokens(access: "new-access", refresh: "new-refresh")
+    }
+
+    let tokens = AuthTokens(access: "expired-access", refresh: "shared-refresh")
+    async let first = coordinator.refresh(tokens, perform: perform)
+    while flights.value == 0 { await Task.yield() }
+    async let second = coordinator.refresh(tokens, perform: perform)
+    // Give the second caller time to join the parked flight before it ends.
+    try await Task.sleep(for: .milliseconds(50))
+    releaseContinuation.finish()
+
+    let (a, b) = try await (first, second)
+    #expect(flights.value == 1)
+    #expect(a == b)
+  }
+
+  /// A completed flight is never shared: success replaced the tokens callers
+  /// hold, and a transient failure must be retried with a fresh request.
+  @Test func aCompletedFlightDoesNotShareWithLaterRefreshes() async throws {
+    let tokens = AuthTokens(access: "expired-access", refresh: "retried-refresh")
+    RefreshStubProtocol.requestCount.setValue(0)
+
+    let first = try await refresh(
+      tokens: tokens,
+      statusCode: 200,
+      body: Data(#"{"accessToken":"a1","refreshToken":"r1"}"#.utf8)
+    )
+    let second = try await refresh(
+      tokens: tokens,
+      statusCode: 200,
+      body: Data(#"{"accessToken":"a2","refreshToken":"r2"}"#.utf8)
+    )
+
+    #expect(RefreshStubProtocol.requestCount.value == 2)
+    #expect(first.access == "a1")
+    #expect(second.access == "a2")
   }
 }
